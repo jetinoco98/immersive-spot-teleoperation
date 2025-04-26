@@ -1,10 +1,67 @@
 #!/usr/bin/env python
 
 import argparse
-import struct
 import paho.mqtt.client as mqtt
 import json
 import time
+
+# -- KATVR: New imports --
+import zmq
+import json
+import threading
+from oculus_katvr_calibration import KATVRInputs, HDMCalibrator, update_inputs
+
+
+# -- New global variables --
+katvr = KATVRInputs()
+hdm_calibrator = HDMCalibrator()
+inputs = [0,0,0,0,0,0]
+
+
+# -- New functions --
+def katvr_data_processor(message):
+    global katvr
+
+    data = json.loads(message.decode('utf-8'))
+
+    if isinstance(data, dict):
+        katvr.is_active = True
+        katvr.turn = data["turn"]
+        katvr.move = data["move"]
+        katvr.yaw = data["yaw"]
+
+        if data["calibration"] == True:
+            katvr.requires_calibration = True
+
+
+def hdm_data_processor(message):
+    data = json.loads(message.decode('utf-8'))
+
+    # TODO: Process HDM data
+    if isinstance(data, dict):
+        pass
+
+
+def receive_from_zmq():
+    context = zmq.Context()
+    socket = context.socket(zmq.SUB)
+    socket.bind("tcp://*:5555")
+
+    # Subscribe to both topics
+    socket.setsockopt_string(zmq.SUBSCRIBE, "from_hdm")
+    socket.setsockopt_string(zmq.SUBSCRIBE, "from_katvr")
+
+    while True:
+        topic = socket.recv_string()
+        message = socket.recv()
+
+        if topic == "from_hdm":
+            hdm_data_processor(message)
+        elif topic == "from_katvr":
+            katvr_data_processor(message)
+
+
+# -- OCULUS ORIGINAL CODE --
 
 port = 1883
 topic = "oculus/inputs"
@@ -19,25 +76,39 @@ class OculusClient:
     def on_connect(self, client, userdata, flags, rc):
         print("Connected with result code " + str(rc))
 
+
 def main(broker_address):
-    pipe_path = r'\\.\pipe\MyPipe'
-    pipe = open(pipe_path, 'rb')
     oculus = OculusClient(broker_address)
+
+    # Listen to incoming messages
+    threading.Thread(target=receive_from_zmq, daemon=True).start()
+
     try:
         while True:
-            data = pipe.read(24) 
-            received_tuple = struct.unpack('6f', data)
-            inputs = list(received_tuple)
-            payload = json.dumps(inputs)
+            # The following global variables will be updated from the ZMQ thread: 
+            # inputs, katvr
+
+            # For KATVR: Change the inputs for yaw, move and turn when KATVR active
+            if katvr.is_active:
+                final_inputs = update_inputs(inputs, katvr, hdm_calibrator)
+            else:
+                final_inputs = inputs
+
+            # Publish the inputs through MQTT
+            payload = json.dumps(final_inputs)
             oculus.client.publish(topic, payload)
+
+            # Frequency of 20Hz
             time.sleep(0.05)
+
     except KeyboardInterrupt:
         pass
+
     finally:
-        pipe.close()
         oculus.client.loop_stop()
         oculus.client.disconnect()
         print("Oculus client disconnected.")
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Send video stream to RTSP server")

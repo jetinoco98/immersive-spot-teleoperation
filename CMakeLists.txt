@@ -1,66 +1,76 @@
-set(OCULUS_PATH "OCULUS_SDK_ROOT_DIR-NOTFOUND" REQUIRED CACHE STRING "Path of OVR SDK folder. eg: C:\\ovr_sdk_win_0.17.0\\OculusSDK")
-set(SDL_PATH "SDL2_ROOT_DIR-NOTFOUND" REQUIRED CACHE STRING "Path of SDL2 folder. eg: C:\\SDL2-2.0.3")
+cmake_minimum_required(VERSION 3.15)
+project(immersive_spot_teleoperation LANGUAGES CXX CUDA)
 
-project(ZED_Stereo_Passthrough)
-cmake_minimum_required(VERSION 3.1)
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
 
-if(COMMAND cmake_policy)
-	cmake_policy(SET CMP0003 OLD)
-	cmake_policy(SET CMP0015 OLD)
-endif(COMMAND cmake_policy)
+# Set the policy to avoid warning for the removed FindCUDA module
+cmake_policy(SET CMP0146 NEW)
 
-set(CMAKE_CXX_STANDARD 11)
+# Libraries that are part of the system
+find_package(OpenGL REQUIRED)
 
-# Mandatory
-find_package(ZED 3 REQUIRED)
-find_package(GLEW REQUIRED)
-find_package(CUDA REQUIRED)
-find_package(OpenGL 3.0 REQUIRED)
+# Libraries that the user needs to manually install
+find_package(ZED REQUIRED)
+set(CUDA_DIR "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8")
+find_package(CUDAToolkit REQUIRED)
 
-set(OCULUS_LIBRARY_DIRS ${OCULUS_PATH}/LibOVR/Lib/Windows/x64/Release/VS2015)
-set(SDL_LIBRARY_DIRS ${SDL_PATH}/lib/x64)
+# Full library stored on the project itself
+set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv/build")
+find_package(OpenCV REQUIRED)
+set(OpenCV_LIB_DIRS "${CMAKE_SOURCE_DIR}/external/opencv/build/x64/vc16/lib")
 
-set(OCULUS_INCLUDE_DIRS ${OCULUS_PATH}/LibOVR/Include ${OCULUS_PATH}/LibOVRKernel/Src)
-set(OCULUS_LIBRARIES LibOVR)
 
-set(SDL_INCLUDE_DIRS ${SDL_PATH}/include)
-set(SDL_LIBRARIES SDL2 SDL2main)
-
-set(SRC_FOLDER src)
-file(GLOB_RECURSE SRC_FILES "${SRC_FOLDER}/*.cpp")
-
-add_executable(${CMAKE_PROJECT_NAME} ${SRC_FILES})
-target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
-	${ZED_INCLUDE_DIRS}
-	${GLUT_INCLUDE_DIRS}
-	${CMAKE_CURRENT_SOURCE_DIR}/include
-	${OCULUS_INCLUDE_DIRS}
-	${SDL_INCLUDE_DIRS}
-	${CUDA_INCLUDE_DIRS}
-)
-target_link_directories(${CMAKE_PROJECT_NAME} PUBLIC
-	${ZED_LIBRARY_DIR}
-	${GLUT_LIBRARY_DIRS}
-	${OpenGL_LIBRARY_DIRS}
-	${SDL_LIBRARY_DIRS}
-	${OCULUS_LIBRARY_DIRS}
-	${CUDA_LIBRARY_DIRS}
+# Include headers
+include_directories(
+    ${CMAKE_SOURCE_DIR}/external/zmq/include
+    ${CMAKE_SOURCE_DIR}/external/glew/include
+    ${CMAKE_SOURCE_DIR}/external/SDL2/include
+    ${CMAKE_SOURCE_DIR}/external/ovr_sdk/LibOVR/Include
+    ${OpenCV_INCLUDE_DIRS}
 )
 
-add_definitions(-O3)
-set_property(TARGET ${CMAKE_PROJECT_NAME} PROPERTY OUTPUT_NAME "ZED Stereo Passthrough")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
 
-# Add the required libraries for linking:
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-	${ZED_LIBRARIES}
-	${OPENGL_LIBRARIES}
-	${GLUT_LIBRARY}
-	${GLEW_LIBRARIES}
-	${SDL_LIBRARIES}
-	${OCULUS_LIBRARIES}
-	${CUDA_CUDA_LIBRARY}
-	${CUDA_CUDART_LIBRARY}
-	${CUDA_NPP_LIBRARIES_ZED}
+# Link libraries
+link_directories(
+    ${CMAKE_SOURCE_DIR}/external/zmq/lib
+    ${CMAKE_SOURCE_DIR}/external/glew/lib/Release/x64
+    ${CMAKE_SOURCE_DIR}/external/SDL2/lib/x64
+    ${CMAKE_SOURCE_DIR}/external/ovr_sdk/LibOVR/Lib/Windows/x64/Release/VS2017
+    ${OpenCV_LIB_DIRS}
+)
+
+# Define your executable
+add_executable(main_test src/main_test.cpp)
+
+
+target_link_libraries(main_test PRIVATE
+    libzmq-v143-mt-4_3_6
+    glew32
+    SDL2
+    OpenGL::GL
+    LibOVR
+    ${ZED_LIBRARIES}
+    CUDA::cudart
+    ${OpenCV_LIBS}
+)
+
+# Include ZED headers and libraries
+target_include_directories(main_test PRIVATE ${ZED_INCLUDE_DIRS})
+
+
+# Set the subsystem to Console (for console apps)
+set_target_properties(main_test PROPERTIES LINK_FLAGS "/SUBSYSTEM:CONSOLE")
+
+
+# -- General automated steps --
+
+# Define the target DLL output folder (Release or Debug)
+set(DLL_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+
+# Copy all DLLs from the 'dlls' folder into the output directory after build
+add_custom_command(TARGET main_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${PROJECT_SOURCE_DIR}/external/dlls"
+            "$<TARGET_FILE_DIR:main_test>"
 )
