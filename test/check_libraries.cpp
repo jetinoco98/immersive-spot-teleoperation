@@ -121,7 +121,6 @@ int opencv_test() {
 }
 
 
-// Main entry point
 int main(int argc, char* argv[]) {
     opencv_test();
     return 0;

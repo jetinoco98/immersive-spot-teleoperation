@@ -4,10 +4,28 @@ import time
 import math
 import zmq
 import json
-from scripts.katvr.katvr_log import DataLogger
 
 # --- GLOBAL CONSTANTS ---
 CONTROL_TYPE = "open"
+
+
+# --- HELPER FUNCTIONS ---
+def shift_angle(angle, offset):
+    shifted = angle - offset
+    # Wrap back to [-180, 180]
+    if shifted > 180:
+        shifted -= 360
+    elif shifted < -180:
+        shifted += 360
+    return shifted
+
+def speed_control(speed, low_range, med_range):
+    abs_speed = abs(speed)
+    if low_range <= abs_speed < med_range:
+        return 0.5 if speed >= 0 else -0.5
+    elif abs_speed >= med_range:
+        return 1.0 if speed >= 0 else -1.0
+    return 0.0
 
 
 # --- CLASS DEFINITIONS ---
@@ -105,26 +123,6 @@ class TurnClosedLoopController:
 
 
 
-# --- SPEED CONTROL ---
-def speed_control(speed, low_range, med_range):
-    abs_speed = abs(speed)
-    if low_range <= abs_speed < med_range:
-        return 0.5 if speed >= 0 else -0.5
-    elif abs_speed >= med_range:
-        return 1.0 if speed >= 0 else -1.0
-    return 0.0
-
-
-def shift_angle(angle, offset):
-    shifted = angle - offset
-    # Wrap back to [-180, 180]
-    if shifted > 180:
-        shifted -= 360
-    elif shifted < -180:
-        shifted += 360
-    return shifted
-
-
 # --- MESSAGE HANDLING ---
 def message_handler(address, *args):
     global katvr, control, spot_yaw
@@ -146,25 +144,10 @@ def message_handler(address, *args):
     if CONTROL_TYPE == "open":
         output_values = turn_open_loop.process(delta_time, katvr.yaw)
         control.turn = output_values[0]
-        # Log open loop data
-        # data_logger.log_open_loop_data(
-        #     control_signal=output_values[0],
-        #     raw_angular_velocity=output_values[1],
-        #     smoothed_angular_velocity_rad=output_values[2],
-        #     yaw=katvr.yaw,
-        #     move_speed=katvr.move_speed
-        # )
         
     elif CONTROL_TYPE == "closed" and katvr.yaw is not None:
         output_values = turn_closed_loop.process(delta_time, katvr.yaw, spot_yaw)
         control.turn = output_values[0]
-        # Log closed loop data
-        # data_logger.log_closed_loop_data(
-        #     control_signal=output_values[0],
-        #     error=output_values[1],
-        #     yaw=katvr.yaw,
-        #     move_speed=katvr.move_speed
-        # )
     
     # Movement control
     control.move = speed_control(katvr.move_speed, 0.7, 3.0)
@@ -214,6 +197,7 @@ def share_katvr_data():
         time.sleep(0.05)
 
 
+# --- OPTIONAL: PRINT KATVR FREQUENCY ---
 def print_katvr_frequency():
     global katvr
     while True:
@@ -230,13 +214,9 @@ turn_open_loop = TurnOpenLoopController()
 turn_closed_loop = TurnClosedLoopController(kp=0.2, kd=0.0, deadband=1.0)
 spot_yaw = 0
 
-# TODO: Pending improvement of logging logic
-# data_logger = DataLogger()
-
 # Start threads
 threading.Thread(target=start_osc_server, args=(message_handler,), daemon=True).start()
 threading.Thread(target=share_katvr_data, daemon=True).start()
-# threading.Thread(target=tuning, daemon=True).start()
 
 # For testing purposes
 # if there is lag in Unreal Engine, the frequency will be lower than 60.
@@ -244,14 +224,10 @@ threading.Thread(target=share_katvr_data, daemon=True).start()
 
 while True:
     try:
-        # Calibrate katvr and spot with command "cs"
-        # Calibrate katvr and hdm with command "ch"
+        # Calibrate (KATVR - HDM) with command "c"
         command = input("Enter a command: ")
-        if command == "cs":
-            pass
-        elif command == "ch":
+        if command == "c":
             katvr.requires_hdm_calibration = True
-        time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nExiting...")
         exit()

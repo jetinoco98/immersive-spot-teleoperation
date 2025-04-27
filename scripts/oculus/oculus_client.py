@@ -8,6 +8,7 @@ import time
 # -- KATVR: New imports --
 import zmq
 import json
+import struct
 import threading
 from oculus_katvr_calibration import KATVRInputs, HDMCalibrator, update_inputs
 
@@ -18,28 +19,24 @@ hdm_calibrator = HDMCalibrator()
 inputs = [0,0,0,0,0,0]
 
 
-# -- New functions --
+# -- New functions for receiving data --
 def katvr_data_processor(message):
     global katvr
 
     data = json.loads(message.decode('utf-8'))
 
-    if isinstance(data, dict):
-        katvr.is_active = True
-        katvr.turn = data["turn"]
-        katvr.move = data["move"]
-        katvr.yaw = data["yaw"]
+    katvr.is_active = True
+    katvr.turn = data["turn"]
+    katvr.move = data["move"]
+    katvr.yaw = data["yaw"]
 
-        if data["calibration"] == True:
-            katvr.requires_calibration = True
+    if data["calibration"] == True:
+        katvr.requires_calibration = True
 
 
 def hdm_data_processor(message):
-    data = json.loads(message.decode('utf-8'))
-
-    # TODO: Process HDM data
-    if isinstance(data, dict):
-        pass
+    global inputs
+    inputs = list(struct.unpack('6f', message)) 
 
 
 def receive_from_zmq():
@@ -61,8 +58,7 @@ def receive_from_zmq():
             katvr_data_processor(message)
 
 
-# -- OCULUS ORIGINAL CODE --
-
+# -- OCULUS CLIENT ORIGINAL CODE --
 port = 1883
 topic = "oculus/inputs"
 
@@ -77,6 +73,7 @@ class OculusClient:
         print("Connected with result code " + str(rc))
 
 
+# -- MAIN FUNCTION --
 def main(broker_address):
     oculus = OculusClient(broker_address)
 
@@ -85,15 +82,13 @@ def main(broker_address):
 
     try:
         while True:
-            # The following global variables will be updated from the ZMQ thread: 
-            # inputs, katvr
+            # Inputs from HDM
+            final_inputs = inputs
 
-            # For KATVR: Change the inputs for yaw, move and turn when KATVR active
+            # Update to KATVR inputs when active
             if katvr.is_active:
                 final_inputs = update_inputs(inputs, katvr, hdm_calibrator)
-            else:
-                final_inputs = inputs
-
+                
             # Publish the inputs through MQTT
             payload = json.dumps(final_inputs)
             oculus.client.publish(topic, payload)

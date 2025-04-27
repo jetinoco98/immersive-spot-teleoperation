@@ -12,7 +12,9 @@
 
 #include <GL/glew.h>
 
- /*Depending on the SDL version you are using, you may have to include SDL2/SDL.h or directly SDL.h (2.0.7)*/
+ /*Depending on the SDL version you are using, you may have to include SDL2/SDL.h 
+ or directly SDL.h (2.0.7)*/
+#define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <SDL_syswm.h>
 
@@ -28,12 +30,22 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <zmq.hpp>
 
 #include "Shader.hpp"
 
 
-
 using namespace std;
+
+
+// ===================================================
+// ----- SHADER STRINGS -----
+// ===================================================
+// OVR_ZED_VS is a vertex shader that takes a 3D vertex and a 2D texture coordinate 
+// as input, and outputs a 2D texture coordinate and a 4D position.
+//
+// OVR_ZED_FS is a fragment shader that takes a 2D texture coordinate as input, 
+// samples a 2D texture u_textureZED at that coordinate, and outputs a 4D color
 
 GLchar* OVR_ZED_VS =
 "#version 330 core\n \
@@ -66,6 +78,14 @@ GLchar* OVR_ZED_FS =
 			}";
 
 
+// ===================================================
+// ----- OpenCV to OpenGL FUNCTION -----
+// ===================================================
+// This function binds an OpenCV matrix (cv::Mat) to an OpenGL texture,
+// allowing it to be used in 3D rendering and other OpenGL operations.
+// It generates a new OpenGL texture ID, sets texture parameters,
+// and uploads the texture data from the OpenCV matrix.
+
 void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
 {
     if (image.empty()) {
@@ -97,6 +117,10 @@ void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
             image.ptr());        // The actual image data itself
     }
 }
+
+// ===================================================
+// ----- VIDEO CAPTURE THREAD FUNCTION -----
+// ===================================================
 
 // Packed data for threaded computation
 struct ThreadData {
@@ -132,6 +156,11 @@ void __capture_runner__(ThreadData& thread_data, cv::VideoCapture cv_capture) {
     }
 }
 
+
+// ===================================================
+// ----- RPY CONVERTER FUNCTION -----
+// ===================================================
+
 struct RPY {
     double roll, pitch, yaw;
 };
@@ -164,6 +193,11 @@ RPY quaternionToRPY(ovrTrackingState ts) {
 
     return rpy;
 }
+
+
+// ===================================================
+// ----- MAIN FUNCTION -----
+// ===================================================
 
 int main(int argc, char** argv) {
     // Initialize SDL2's context
@@ -462,7 +496,6 @@ int main(int argc, char** argv) {
     thread_data.run = true;
     thread_data.new_frame = true;
     // Launch capture video thread
-    //
     std::thread runner(__capture_runner__, std::ref(thread_data), cv_capture);
 
     cudaGraphicsMapResources(1, &cimg_l, 0);
@@ -473,41 +506,26 @@ int main(int argc, char** argv) {
 	char currentDir[MAX_PATH];
 	GetCurrentDirectory(MAX_PATH, currentDir);
 	printf(currentDir);
-	const char* pythonScript = "\\..\\..\\scripts\\oculus_client.py ";
+	const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_client.py ";
 	std::string command = "start cmd /k python " + std::string(currentDir) + std::string(pythonScript) + ip_address;
 	if (system(command.c_str()) != 0) {
 		std::cerr << "Error executing Python script" << std::endl;
 		return 1;
 	}
 
-	// Create named pipe
-	LPCSTR pipeName = "\\\\.\\pipe\\MyPipe";
-	HANDLE hPipe = CreateNamedPipe(
-		pipeName,
-		PIPE_ACCESS_OUTBOUND,
-		PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-		1,
-		0,
-		0,
-		0,
-		NULL
-	);
+	// Initialize ZMQ Socket
+    zmq::context_t zmq_context(1);
+    zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
+    publisher.bind("tcp://*:5555");
+    std::string topic = "from_hdm"; 
 
-	if (hPipe == INVALID_HANDLE_VALUE) {
-		std::cerr << "Error creating named pipe: " << GetLastError() << std::endl;
-		return 1;
-	}
-
-	// Connect to the named pipe
-	if (ConnectNamedPipe(hPipe, NULL) == FALSE) {
-		std::cerr << "Error connecting to named pipe: " << GetLastError() << std::endl;
-		CloseHandle(hPipe);
-		return 1;
-	}
-
+    // Create orientation structure
     RPY orientation;
-    
-    // Main loop
+
+    // ===================================================
+    // ----- MAIN LOOP -----
+    // ===================================================
+
     while (!end) {
         // While there is an event catched and not tested
         while (SDL_PollEvent(&events)) {
@@ -649,7 +667,10 @@ int main(int argc, char** argv) {
         // Swap the SDL2 window
         SDL_GL_SwapWindow(window);
 
-        // Query the HMD for ts current tracking state.
+
+        // ===================================================
+        // Query the HMD for its current tracking state (ts)
+
 		ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
 		ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
 		ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
@@ -667,21 +688,33 @@ int main(int argc, char** argv) {
 		//	rightStick.y, rightStick.x,
 		//	leftStick.x,
 			orientation.yaw, -orientation.pitch, -orientation.roll);
-        //    ts.HeadPose.AngularVelocity.y, -ts.HeadPose.AngularVelocity.x, -ts.HeadPose.AngularVelocity.z);
 
-		// Send float data
-		//float data[] = {orientation.yaw, -orientation.pitch, -orientation.roll, rightStick.y, rightStick.x, leftStick.x};
+
+		// ===================================================
+        // Send HDM data over ZeroMQ 
+
         float data[] = {orientation.yaw, -orientation.pitch,  -orientation.roll, rightStick.y, rightStick.x, leftStick.x};
 		
-        DWORD bytesWritten;
-		if (WriteFile(hPipe, data, sizeof(data), &bytesWritten, NULL) == FALSE) {
-			std::wcerr << "Error writing to named pipe: " << GetLastError() << std::endl;
-		}
+        // Send the first part of the message (topic: "from_hdm")
+        zmq::message_t topic_msg(topic.data(), topic.size());
+        publisher.send(topic_msg, zmq::send_flags::sndmore);
+
+        // Send the second part of the message (HDM data)
+        zmq::message_t data_msg(sizeof(data)); 
+        std::memcpy(data_msg.data(), data, sizeof(data));
+        publisher.send(data_msg, zmq::send_flags::none);
 
     }
 
-    // Close the pipe
-	CloseHandle(hPipe);
+    
+    // ===================================================
+    // ----- CLOSING AND CLEANUP -----
+    // ===================================================
+
+    // Closing ZeroMQ socket
+    publisher.close();
+    zmq_context.shutdown();
+    zmq_context.close();
 
     // Close the cv video capture context
     cv_capture.release();
