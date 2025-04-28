@@ -13,9 +13,9 @@ find_package(ZED REQUIRED)  # User must install manually
 find_package(CUDAToolkit REQUIRED)  # User must install manually
 
 # OpenCV binaries stored on the project external folder
-set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv/build")
+set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv")
 find_package(OpenCV REQUIRED)
-set(OpenCV_LIB_DIRS "${CMAKE_SOURCE_DIR}/external/opencv/build/x64/vc16/lib")
+set(OpenCV_LIB_DIRS "${CMAKE_SOURCE_DIR}/external/opencv/x64/vc16/lib")
 
 # Create a shared library target
 add_library(core_lib INTERFACE)

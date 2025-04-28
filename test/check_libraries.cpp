@@ -22,6 +22,7 @@
 #include <cuda_gl_interop.h>
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/videoio.hpp>
 
 
 int zmq_test() {
@@ -132,9 +133,42 @@ int opencv_test() {
     return 0;
 }
 
+int opencv_with_gstreamer_test(){
+    // Basic OpenCV test to create an image
+    cv::Mat img = cv::Mat::zeros(300, 300, CV_8UC3);
+    cv::putText(img, "Hello OpenCV!", cv::Point(30, 150),
+                cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 255, 255), 2);
+
+    // Display the test image
+    cv::imshow("OpenCV Test Window", img);
+
+    // Check if GStreamer is working by reading a video
+    cv::VideoCapture cap("videotestsrc ! videoconvert ! appsink");  // GStreamer pipeline
+
+    if (!cap.isOpened()) {
+        std::cerr << "Error: GStreamer test failed to open video stream!" << std::endl;
+        return -1;
+    }
+
+    // Read and display a frame to verify GStreamer works
+    cv::Mat frame;
+    cap >> frame;  // Grab a frame from GStreamer
+
+    if (!frame.empty()) {
+        cv::imshow("GStreamer Test", frame);  // Show the frame
+    } else {
+        std::cerr << "Error: Failed to grab a frame from GStreamer!" << std::endl;
+        return -1;
+    }
+
+    // Wait for user input before closing windows
+    cv::waitKey(0);
+    return 0;
+}
+
 
 int main(int argc, char* argv[]) {
-    opencv_test();
+    opencv_with_gstreamer_test();
     return 0;
 }
 
