@@ -36,6 +36,7 @@
 
 
 using namespace std;
+bool connected = true;
 
 
 // ===================================================
@@ -134,10 +135,15 @@ struct ThreadData {
 // Video capture thread
 void __capture_runner__(ThreadData& thread_data, cv::VideoCapture cv_capture) {
     cv::Mat frame;
+    auto last_success = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::seconds(5); // Customize the timeout
+
     // Loop while the main loop is not over
     while (thread_data.run) {
         // try to grab a new image
         if (cv_capture.read(frame)) {
+            last_success = std::chrono::steady_clock::now(); // Reset the timer
+
             // copy both left and right images
             thread_data.mtx.lock();
             // Define the first ROI (left part of the frame)
@@ -152,7 +158,15 @@ void __capture_runner__(ThreadData& thread_data, cv::VideoCapture cv_capture) {
             thread_data.new_frame = true;
         }
         else
-            sl::sleep_ms(2);
+        Sleep(2);
+        // Check for timeout
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_success > timeout) {
+            std::cerr << "[ERROR] No frame received for 5 seconds. Stopping capture thread." << std::endl;
+            connected = false;
+            Sleep(5000);
+            std::exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -237,38 +251,17 @@ int main(int argc, char** argv) {
     // Create a struct which contains the sl::Camera and the associated data
     ThreadData thread_data;
 
-    if (argc < 2) {
-        std::cerr << "Error: No arguments provided." << std::endl;
-        ovr_Shutdown();
-        SDL_Quit();
-        return -1;
-    }
-
     std::string ip_address;
-    std::string image_source;
-    ip_address = argv[1];
-    image_source = argv[2];
-    /*if (argc < 3) 
-        image_source = "ZED";
-    else {
-        if (argv[2] == "ZED" || argv[2] == "SPOT") 
-            image_source = argv[2];
-        else {
-            std::cout << argv[2] << std::endl;
-            std::cerr << "Error: Image source is not valid." << std::endl;
-            ovr_Shutdown();
-            SDL_Quit();
-            return -1;
-        }
-    }*/
 
+    if (argc < 2) {
+        ip_address = "48.209.18.239";
+        printf("no args");
+        
+    } else {
+        ip_address = argv[1];
+    }
     std::string pipeline;
-
-    if (image_source == "SPOT")
-        pipeline = "rtspsrc location=rtsp://" + ip_address + ":8554/spot-stream latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=720,format=GRAY8 ! appsink";
-    else 
-        pipeline = "rtspsrc location=rtsp://" + ip_address + ":8554/spot-stream latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=240,format=GRAY8 ! appsink";
-
+    pipeline = "rtspsrc location=rtsp://" + ip_address + ":8554/spot-stream latency=0 ! rtph264depay ! h264parse ! openh264dec ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=GRAY8 ! appsink";
     cv::VideoCapture cv_capture(pipeline, cv::CAP_GSTREAMER);
 
     // Check if the video stream is opened successfully
@@ -307,6 +300,8 @@ int main(int argc, char** argv) {
     float pixel_density = 1.75f;
     ovrHmdDesc hmdDesc = ovr_GetHmdDesc(session);
     ovrInputState InputState;
+    ovrInputState LastInputState;
+    float robot_stand = 0.0;
     // Get the texture sizes of Oculus eyes
     ovrSizei textureSize0 = ovr_GetFovTextureSize(session, ovrEye_Left, hmdDesc.DefaultEyeFov[0], pixel_density);
     ovrSizei textureSize1 = ovr_GetFovTextureSize(session, ovrEye_Right, hmdDesc.DefaultEyeFov[1], pixel_density);
@@ -437,18 +432,10 @@ int main(int argc, char** argv) {
         float left, up, right, down;
     } screenCoord;
 
-
-    if (image_source == "ZED") {
-        screenCoord.up = heightGL + offsetLensCenterY;
-        screenCoord.down = heightGL - offsetLensCenterY;
-        screenCoord.right = widthGL * .75 + offsetLensCenterX;
-        screenCoord.left = widthGL * .75 - offsetLensCenterX;
-    } else if (image_source == "SPOT") {
-        screenCoord.up = heightGL / 2 + offsetLensCenterY;
-        screenCoord.down = heightGL / 2 - offsetLensCenterY;
-        screenCoord.right = widthGL / 2 + offsetLensCenterX;
-        screenCoord.left = widthGL / 2 - offsetLensCenterX;
-    }
+    screenCoord.up = heightGL + offsetLensCenterY;
+    screenCoord.down = heightGL - offsetLensCenterY;
+    screenCoord.right = widthGL * .75 + offsetLensCenterX;
+    screenCoord.left = widthGL * .75 - offsetLensCenterX;
     
 
     float rectVertices[12] = { -screenCoord.left, -screenCoord.up, 0, screenCoord.right, -screenCoord.up, 0, screenCoord.right, screenCoord.down, 0, -screenCoord.left, screenCoord.down, 0 };
@@ -521,6 +508,8 @@ int main(int argc, char** argv) {
 
     // Create orientation structure
     RPY orientation;
+    // Create HDM data array
+    double data[7];
 
     // ===================================================
     // ----- MAIN LOOP -----
@@ -618,10 +607,7 @@ int main(int argc, char** argv) {
             // Set the color texture as the current swap texture
             ld.ColorTexture[eye] = textureChain;
             // Set the viewport as the right or left vertical half part of the color texture
-            if (image_source == "ZED")
-                ld.Viewport[eye] = OVR::Recti(eye == ovrEye_Left ? 0 : (bufferSize.w / 2) + 200, 0, (bufferSize.w / 2) - 200, bufferSize.h);
-            else if (image_source == "SPOT")
-                ld.Viewport[eye] = OVR::Recti(eye == ovrEye_Left ? 0 : (bufferSize.w / 2) - 400, 0, (bufferSize.w / 2) + 400, bufferSize.h);
+            ld.Viewport[eye] = OVR::Recti(eye == ovrEye_Left ? 0 : (bufferSize.w / 2) + 200, 0, (bufferSize.w / 2) - 200, bufferSize.h);
             // Set the field of view
             ld.Fov[eye] = hmdDesc.DefaultEyeFov[eye];
             // Set the pose matrix
@@ -671,29 +657,44 @@ int main(int argc, char** argv) {
         // ===================================================
         // Query the HMD for its current tracking state (ts)
 
-		ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
-		ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
-		ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
-		ovrVector2f leftStick = InputState.Thumbstick[ovrHand_Left];
-		const float radialDeadZone = 0.5;
-		if (std::abs(rightStick.x) < radialDeadZone) rightStick.x = 0.0;
-		if (std::abs(rightStick.y) < radialDeadZone) rightStick.y = 0.0;
+		// Query the HMD for ts current tracking state.
+        ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
+        ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
+        ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
+        ovrVector2f leftStick = InputState.Thumbstick[ovrHand_Left];
+        const float radialDeadZone = 0.5;
+        if (std::abs(leftStick.x) < radialDeadZone) leftStick.x = 0.0;
+        if (std::abs(leftStick.y) < radialDeadZone) leftStick.y = 0.0;
+        if (std::abs(rightStick.x) < radialDeadZone) rightStick.x = 0.0;
+
+        bool buttonPressed_A = ((InputState.Buttons & ovrButton_A) != 0);
+        bool wasButtonPressed_A = ((LastInputState.Buttons & ovrButton_A) != 0);
+        bool justPressedA = (!wasButtonPressed_A && buttonPressed_A);
+
+        bool buttonPressed_B = ((InputState.Buttons & ovrButton_B) != 0);
+        bool wasButtonPressed_B = ((LastInputState.Buttons & ovrButton_B) != 0);
+        bool justPressedB = (!wasButtonPressed_B && buttonPressed_B);
+
+        if (justPressedA && !robot_stand) robot_stand = 1.0;
+        if (justPressedB && robot_stand) robot_stand = 0.0;
 
         orientation = quaternionToRPY(ts);
 
+        data[0] = orientation.yaw;
+        data[1] = -orientation.pitch; 
+        data[2] = -orientation.roll;
+        data[3] = leftStick.y;
+        data[4] = leftStick.x;
+        data[5] = rightStick.x;
+        data[6] = robot_stand;
+
         printf(
-		//	" Touch Lin Vel (XY): %4.2f  %4.2f\n"
-		//	" Touch Rot Vel (Z):  %4.2f\n",
-			" HMD Ang (YPR): %4.2f  %4.2f  %4.2f\n",
-		//	rightStick.y, rightStick.x,
-		//	leftStick.x,
-			orientation.yaw, -orientation.pitch, -orientation.roll);
+            " HMD Ang (YPR): %4.2f  %4.2f  %4.2f, %4.2f\n",
+            data[0], data[1], data[2], data[6]);
 
 
 		// ===================================================
-        // Send HDM data over ZeroMQ 
-
-        float data[] = {orientation.yaw, -orientation.pitch,  -orientation.roll, rightStick.y, rightStick.x, leftStick.x};
+        // Send HDM data over ZeroMQ socket
 		
         // Send the first part of the message (topic: "from_hdm")
         zmq::message_t topic_msg(topic.data(), topic.size());
