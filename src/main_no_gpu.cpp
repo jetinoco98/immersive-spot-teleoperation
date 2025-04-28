@@ -711,6 +711,9 @@ int main(int argc, char** argv) {
         std::memcpy(data_msg.data(), data, sizeof(data));
         publisher.send(data_msg, zmq::send_flags::none);
 
+        // Update the last input state
+        memcpy(&LastInputState, &InputState, sizeof(InputState));
+
     }
 
     
