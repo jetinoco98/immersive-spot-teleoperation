@@ -12,30 +12,27 @@ find_package(OpenGL REQUIRED)
 find_package(ZED REQUIRED)  # User must install manually
 find_package(CUDAToolkit REQUIRED)  # User must install manually
 
-# OpenCV binaries stored on the project itself
+# OpenCV binaries stored on the project external folder
 set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv/build")
 find_package(OpenCV REQUIRED)
 set(OpenCV_LIB_DIRS "${CMAKE_SOURCE_DIR}/external/opencv/build/x64/vc16/lib")
 
-# Define the main executable
-set(CMAKE_WIN32_EXECUTABLE FALSE) # To ensure it's treated as a console application
-set(SRC_FOLDER src)
-file(GLOB_RECURSE SRC_FILES "${SRC_FOLDER}/*.cpp")
-add_executable(${CMAKE_PROJECT_NAME} ${SRC_FILES})
+# Create a shared library target
+add_library(core_lib INTERFACE)
 
 # Include directories
-target_include_directories(${CMAKE_PROJECT_NAME} PUBLIC
+target_include_directories(core_lib INTERFACE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/external/zmq/include
     ${CMAKE_SOURCE_DIR}/external/glew/include
     ${CMAKE_SOURCE_DIR}/external/SDL2/include
     ${CMAKE_SOURCE_DIR}/external/ovr_sdk/LibOVR/Include
     ${OpenCV_INCLUDE_DIRS}
-    ${ZED_INCLUDE_DIRS}  # ZED-specific includes
+    ${ZED_INCLUDE_DIRS}
 )
 
 # Link directories
-target_link_directories(${CMAKE_PROJECT_NAME} PUBLIC
+target_link_directories(core_lib INTERFACE
     ${CMAKE_SOURCE_DIR}/external/zmq/lib
     ${CMAKE_SOURCE_DIR}/external/glew/lib/Release/x64
     ${CMAKE_SOURCE_DIR}/external/SDL2/lib/x64
@@ -44,7 +41,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PUBLIC
 )
 
 # Link libraries
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
+target_link_libraries(core_lib INTERFACE
     libzmq-v143-mt-4_3_6
     glew32
     SDL2
@@ -55,21 +52,15 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
     ${OpenCV_LIBS}
 )
 
+# Define the main executable
+set(CMAKE_WIN32_EXECUTABLE FALSE) # To ensure it's treated as a console application
+add_executable(${CMAKE_PROJECT_NAME} "src/main.cpp" "src/Shader.cpp")  # WARNING:*...
+# ...* Change to "src/main_no_gpu.cpp" if you DON'T have an NVIDIA GPU
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE core_lib)
 
-# -- TEMPORARY: Executable for tests --
-add_executable(project_test test/publisher.cpp)
-
-target_include_directories(project_test PUBLIC
-    ${CMAKE_SOURCE_DIR}/external/zmq/include
-)
-
-target_link_directories(project_test PUBLIC
-    ${CMAKE_SOURCE_DIR}/external/zmq/lib
-)
-
-target_link_libraries(project_test PRIVATE
-    libzmq-v143-mt-4_3_6
-)
+# Define the test executable
+add_executable(check_libraries test/check_libraries.cpp)
+target_link_libraries(check_libraries PRIVATE core_lib)
 
 
 # -- DLL Copy Automation --
