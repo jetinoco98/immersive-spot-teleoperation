@@ -11,14 +11,13 @@ def receive_from_zmq():
     print("Waiting for messages...")
 
     while True:
-        # Receive the topic AND data
-        topic = socket.recv_string()  # This should be "from_cpp"
-        data = socket.recv()  # this is binary data
+        topic = socket.recv_string()  # Receive topic
+        data = socket.recv()          # Receive one float in binary
 
-        # Convert the binary data into a list of 6 floats
-        floats = struct.unpack('6f', data)  
+        # Unpack a single float
+        value = struct.unpack('f', data)[0]
 
-        print(f"Received from C++: {floats}")
+        print(f"Received from C++: {value}")
 
 # Run the subscriber
 receive_from_zmq()

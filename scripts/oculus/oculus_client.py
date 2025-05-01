@@ -36,7 +36,10 @@ def katvr_data_processor(message):
 
 def hdm_data_processor(message):
     global inputs
-    inputs = list(struct.unpack('6f', message)) 
+    try:
+        inputs = list(struct.unpack('7f', message))
+    except:
+        print("Error in incoming message format")
 
 
 def receive_from_zmq():
@@ -54,7 +57,7 @@ def receive_from_zmq():
 
         if topic == "from_hdm":
             hdm_data_processor(message)
-        elif topic == "from_katvr":
+        if topic == "from_katvr":
             katvr_data_processor(message)
 
 
@@ -88,6 +91,8 @@ def main(broker_address):
             # Update to KATVR inputs when active
             if katvr.is_active:
                 final_inputs = update_inputs(inputs, katvr, hdm_calibrator)
+
+            print("Inputs: ", final_inputs)
                 
             # Publish the inputs through MQTT
             payload = json.dumps(final_inputs)

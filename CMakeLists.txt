@@ -52,15 +52,16 @@ target_link_libraries(core_lib INTERFACE
     ${OpenCV_LIBS}
 )
 
-# Define the main executable
+# Define the main executables
 set(CMAKE_WIN32_EXECUTABLE FALSE) # To ensure it's treated as a console application
-add_executable(${CMAKE_PROJECT_NAME} "src/main.cpp" "src/Shader.cpp")  # WARNING:*...
-# ...* Change to "src/main_no_gpu.cpp" if you DON'T have an NVIDIA GPU
+add_executable(${CMAKE_PROJECT_NAME} "src/main.cpp" "src/Shader.cpp")
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE core_lib)
 
-# Define the test executable
+# Define the test executables
 add_executable(check_libraries test/check_libraries.cpp)
+add_executable(hdm_test test/hdm_test.cpp)
 target_link_libraries(check_libraries PRIVATE core_lib)
+target_link_libraries(hdm_test PRIVATE core_lib)
 
 
 # -- DLL Copy Automation --
@@ -73,3 +74,6 @@ add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
             "${PROJECT_SOURCE_DIR}/external/dlls"
             "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>"
 )
+
+# -- JSON File Copy --
+configure_file(config.json config.json COPYONLY)

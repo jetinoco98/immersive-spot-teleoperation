@@ -26,31 +26,30 @@
 
 
 int zmq_test() {
-    float data[] = { 0.0f, -2.0f, -3.0f, 4.0f, 5.0f, 6.0f };
+    zmq::context_t context(1);
+    zmq::socket_t publisher(context, zmq::socket_type::pub);
+    publisher.bind("tcp://*:5555");
 
-    zmq::context_t zmq_context(1);
-    zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
-    publisher.bind("tcp://*:5555"); 
-    std::string topic = "from_cpp";  
+    std::string topic = "from_cpp";
+    float value = 0.0f;
 
     while (true) {
+        value += 1.0f;
+
+        // Send topic
         zmq::message_t topic_msg(topic.data(), topic.size());
         publisher.send(topic_msg, zmq::send_flags::sndmore);
 
-        // Increment first value
-        data[0] += 1.0f;
+        // Send value
+        zmq::message_t value_msg(sizeof(value));
+        std::memcpy(value_msg.data(), &value, sizeof(value));
+        publisher.send(value_msg, zmq::send_flags::none);
 
-        zmq::message_t data_msg(sizeof(data)); 
-        std::memcpy(data_msg.data(), data, sizeof(data));
-        publisher.send(data_msg, zmq::send_flags::none);
+        std::printf("Sent value: %.1f\n", value);
 
-        printf("Sent data: %.1f, %.1f, %.1f, %.1f, %.1f, %.1f\n", 
-               data[0], data[1], data[2], data[3], data[4], data[5]);
-
-        // Send every second
-        std::this_thread::sleep_for(std::chrono::seconds(1));  
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
-    
+
     return 0;
 }
 
@@ -168,7 +167,7 @@ int opencv_with_gstreamer_test(){
 
 
 int main(int argc, char* argv[]) {
-    opencv_with_gstreamer_test();
+    ovr_test();
     return 0;
 }
 

@@ -84,6 +84,10 @@
         "stack": "cpp",
         "typeindex": "cpp",
         "unordered_set": "cpp",
-        "xtree": "cpp"
+        "xtree": "cpp",
+        "any": "cpp",
+        "filesystem": "cpp",
+        "ranges": "cpp",
+        "valarray": "cpp"
     }
 }

@@ -1,4 +1,4 @@
-from scripts.katvr.katvr_osc_sockets import send_osc_message, start_osc_server
+from katvr_osc_sockets import send_osc_message, start_osc_server
 import threading
 import time
 import math
@@ -8,6 +8,10 @@ import json
 # --- GLOBAL CONSTANTS ---
 CONTROL_TYPE = "open"
 
+# --- ZMQ Init ---
+context = zmq.Context()
+socket = context.socket(zmq.PUB)
+socket.connect("tcp://localhost:5555")
 
 # --- HELPER FUNCTIONS ---
 def shift_angle(angle, offset):
@@ -157,11 +161,6 @@ def message_handler(address, *args):
 
 # --- SEND DATA TO OCULUS CLIENT ---
 def send_to_oculus_client():
-    global katvr, control
-
-    context = zmq.Context()
-    socket = context.socket(zmq.PUB)
-    socket.connect("tcp://localhost:5555")
 
     data = {
         "turn": round(float(control.turn), 2),

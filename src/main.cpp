@@ -2,18 +2,13 @@
 
 #include <stdio.h>
 #include <string.h>
-
 #include <iostream>
 #include <Windows.h>
-
 #include <cmath>
-
 #include <stddef.h>
 
 #include <GL/glew.h>
 
- /*Depending on the SDL version you are using, you may have to include SDL2/SDL.h 
- or directly SDL.h (2.0.7)*/
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #include <SDL_syswm.h>
@@ -22,10 +17,6 @@
 #include <OVR_CAPI.h>
 #include <OVR_CAPI_GL.h>
 
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuda_gl_interop.h>
-
 #include <sl/Camera.hpp>
 
 #include <opencv2/opencv.hpp>
@@ -33,20 +24,17 @@
 #include <zmq.hpp>
 
 #include "Shader.hpp"
+#include "json.hpp"
 
 
+using json = nlohmann::json;
 using namespace std;
-bool connected = true;
 
+bool connected = true;
 
 // ===================================================
 // ----- SHADER STRINGS -----
 // ===================================================
-// OVR_ZED_VS is a vertex shader that takes a 3D vertex and a 2D texture coordinate 
-// as input, and outputs a 2D texture coordinate and a 4D position.
-//
-// OVR_ZED_FS is a fragment shader that takes a 2D texture coordinate as input, 
-// samples a 2D texture u_textureZED at that coordinate, and outputs a 4D color
 
 GLchar* OVR_ZED_VS =
 "#version 330 core\n \
@@ -84,8 +72,6 @@ GLchar* OVR_ZED_FS =
 // ===================================================
 // This function binds an OpenCV matrix (cv::Mat) to an OpenGL texture,
 // allowing it to be used in 3D rendering and other OpenGL operations.
-// It generates a new OpenGL texture ID, sets texture parameters,
-// and uploads the texture data from the OpenCV matrix.
 
 void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
 {
@@ -120,7 +106,7 @@ void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
 }
 
 // ===================================================
-// ----- VIDEO CAPTURE THREAD FUNCTION -----
+// ----- VIDEO CAPTURE THREAD -----
 // ===================================================
 
 // Packed data for threaded computation
@@ -158,7 +144,7 @@ void __capture_runner__(ThreadData& thread_data, cv::VideoCapture cv_capture) {
             thread_data.new_frame = true;
         }
         else
-        Sleep(2);
+            sl::sleep_ms(2);
         // Check for timeout
         auto now = std::chrono::steady_clock::now();
         if (now - last_success > timeout) {
@@ -172,7 +158,7 @@ void __capture_runner__(ThreadData& thread_data, cv::VideoCapture cv_capture) {
 
 
 // ===================================================
-// ----- RPY CONVERTER FUNCTION -----
+// ----- RPY CONVERTER -----
 // ===================================================
 
 struct RPY {
@@ -181,29 +167,27 @@ struct RPY {
 
 RPY quaternionToRPY(ovrTrackingState ts) {
     RPY rpy;
-    double w, x, y, z;
-
-    w = ts.HeadPose.ThePose.Orientation.w;
-    x = ts.HeadPose.ThePose.Orientation.x;
-    y = ts.HeadPose.ThePose.Orientation.y;
-    z = ts.HeadPose.ThePose.Orientation.z;
+    double w = ts.HeadPose.ThePose.Orientation.w;
+    double x = ts.HeadPose.ThePose.Orientation.x;
+    double y = ts.HeadPose.ThePose.Orientation.y;
+    double z = ts.HeadPose.ThePose.Orientation.z;
 
     // Pitch (x-axis rotation)
     double sinr_cosp = 2 * (w * x + y * z);
     double cosr_cosp = 1 - 2 * (x * x + y * y);
     rpy.pitch = std::atan2(sinr_cosp, cosr_cosp);
 
-    // Yaw (y-axis rotation)
-    double sinp = 2 * (w * y - z * x);
-    if (std::abs(sinp) >= 1)
-        rpy.yaw = std::copysign(M_PI / 2, sinp); // use 90 degrees if out of range
-    else
-        rpy.yaw = std::asin(sinp);
+    // Yaw (y-axis rotation) — FULL RANGE [-180, 180]
+    double siny_cosp = 2 * (w * y + z * x);
+    double cosy_cosp = 1 - 2 * (y * y + z * z);
+    rpy.yaw = std::atan2(siny_cosp, cosy_cosp);
 
     // Roll (z-axis rotation)
-    double siny_cosp = 2 * (w * z + x * y);
-    double cosy_cosp = 1 - 2 * (y * y + z * z);
-    rpy.roll = std::atan2(siny_cosp, cosy_cosp);
+    double sinp = 2 * (w * z - x * y);
+    if (std::abs(sinp) >= 1)
+        rpy.roll = std::copysign(M_PI / 2, sinp);
+    else
+        rpy.roll = std::asin(sinp);
 
     return rpy;
 }
@@ -213,7 +197,22 @@ RPY quaternionToRPY(ovrTrackingState ts) {
 // ----- MAIN FUNCTION -----
 // ===================================================
 
-int main(int argc, char** argv) {
+int main(int argc, char* argv[])  {
+
+    // Obtain variables from JSON file
+    std::ifstream config_file("config.json");
+    if (!config_file) {
+        std::cerr << "Failed to open config.json\n";
+        return 1;
+    }
+
+    json config;
+    config_file >> config;
+
+    std::string ip_address = config.value("ip", "48.209.18.239");
+    std::string stream_address = config.value("stream_address", "48.209.18.239:8554/spot-stream");
+
+
     // Initialize SDL2's context
     SDL_Init(SDL_INIT_VIDEO);
     // Initialize Oculus' context
@@ -251,17 +250,8 @@ int main(int argc, char** argv) {
     // Create a struct which contains the sl::Camera and the associated data
     ThreadData thread_data;
 
-    std::string ip_address;
-
-    if (argc < 2) {
-        ip_address = "48.209.18.239";
-        printf("no args");
-        
-    } else {
-        ip_address = argv[1];
-    }
-    std::string pipeline;
-    pipeline = "rtspsrc location=rtsp://" + ip_address + ":8554/spot-stream latency=0 ! rtph264depay ! h264parse ! openh264dec ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=GRAY8 ! appsink";
+    // Create the OpenCV video capture
+    std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=BGR ! appsink";
     cv::VideoCapture cv_capture(pipeline, cv::CAP_GSTREAMER);
 
     // Check if the video stream is opened successfully
@@ -289,13 +279,6 @@ int main(int argc, char** argv) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    // Register texture
-    cudaGraphicsResource* cimg_l;
-    cudaGraphicsResource* cimg_r;
-    cudaError_t  err = cudaGraphicsGLRegisterImage(&cimg_l, captureTextureID[ovrEye_Left], GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
-    cudaError_t  err2 = cudaGraphicsGLRegisterImage(&cimg_r, captureTextureID[ovrEye_Right], GL_TEXTURE_2D, cudaGraphicsRegisterFlagsWriteDiscard);
-    if (err != cudaSuccess || err2 != cudaSuccess)
-        std::cout << "ERROR: cannot create CUDA texture : " << err << std::endl;
 
     float pixel_density = 1.75f;
     ovrHmdDesc hmdDesc = ovr_GetHmdDesc(session);
@@ -485,9 +468,6 @@ int main(int argc, char** argv) {
     // Launch capture video thread
     std::thread runner(__capture_runner__, std::ref(thread_data), cv_capture);
 
-    cudaGraphicsMapResources(1, &cimg_l, 0);
-    cudaGraphicsMapResources(1, &cimg_r, 0);
-
     // Execute python script
 	printf("Executing python script...\n");
 	char currentDir[MAX_PATH];
@@ -503,13 +483,10 @@ int main(int argc, char** argv) {
 	// Initialize ZMQ Socket
     zmq::context_t zmq_context(1);
     zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
-    publisher.bind("tcp://*:5555");
-    std::string topic = "from_hdm"; 
+    publisher.connect("tcp://localhost:5555");
 
     // Create orientation structure
     RPY orientation;
-    // Create HDM data array
-    double data[7];
 
     // ===================================================
     // ----- MAIN LOOP -----
@@ -543,15 +520,7 @@ int main(int argc, char** argv) {
         if (isVisible) {
             // If successful grab a new capture image
             if (thread_data.new_frame) {
-                // Update the capture frame counter
-                thread_data.mtx.lock();
-                cudaArray_t arrIm;
-                cudaGraphicsSubResourceGetMappedArray(&arrIm, cimg_l, 0, 0);
-                cudaMemcpy2DToArray(arrIm, 0, 0, thread_data.leftImage.data, thread_data.leftImage.step, thread_data.leftImage.cols * 4, thread_data.leftImage.rows, cudaMemcpyDeviceToDevice);
-
-                cudaGraphicsSubResourceGetMappedArray(&arrIm, cimg_r, 0, 0);
-                cudaMemcpy2DToArray(arrIm, 0, 0, thread_data.rightImage.data, thread_data.rightImage.step, thread_data.leftImage.cols * 4, thread_data.leftImage.rows, cudaMemcpyDeviceToDevice);
-                thread_data.mtx.unlock();
+                // Set the flag to false
                 thread_data.new_frame = false;
 
                 BindCVMat2GLTexture(thread_data.leftImage, captureTextureID[0]);
@@ -640,8 +609,7 @@ int main(int argc, char** argv) {
             ovr_RecenterTrackingOrigin(session);
         }
 
-        // Copy the frame to the mirror buffer
-        // which will be drawn in the SDL2 image
+        // Copy the frame to the mirror buffer which will be drawn in the SDL2 image
         glBindFramebuffer(GL_READ_FRAMEBUFFER, mirrorFBOID);
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         GLint w = winWidth;
@@ -657,8 +625,7 @@ int main(int argc, char** argv) {
         // ===================================================
         // Query the HMD for its current tracking state (ts)
 
-		// Query the HMD for ts current tracking state.
-        ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
+		ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
         ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
         ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
         ovrVector2f leftStick = InputState.Thumbstick[ovrHand_Left];
@@ -680,13 +647,8 @@ int main(int argc, char** argv) {
 
         orientation = quaternionToRPY(ts);
 
-        data[0] = orientation.yaw;
-        data[1] = -orientation.pitch; 
-        data[2] = -orientation.roll;
-        data[3] = leftStick.y;
-        data[4] = leftStick.x;
-        data[5] = rightStick.x;
-        data[6] = robot_stand;
+        float data[] = { orientation.yaw, -orientation.pitch, -orientation.roll, 
+            leftStick.y, leftStick.x, rightStick.x, robot_stand};
 
         printf(
             " HMD Ang (YPR): %4.2f  %4.2f  %4.2f, %4.2f\n",
@@ -696,7 +658,8 @@ int main(int argc, char** argv) {
 		// ===================================================
         // Send HDM data over ZeroMQ socket
 		
-        // Send the first part of the message (topic: "from_hdm")
+        // Send the first part of the message (topic)
+        std::string topic = "from_hdm"; 
         zmq::message_t topic_msg(topic.data(), topic.size());
         publisher.send(topic_msg, zmq::send_flags::sndmore);
 
@@ -706,8 +669,7 @@ int main(int argc, char** argv) {
         publisher.send(data_msg, zmq::send_flags::none);
 
         // Update the last input state
-        memcpy(&LastInputState, &InputState, sizeof(InputState));
-
+        LastInputState = InputState;
     }
 
     
@@ -723,9 +685,6 @@ int main(int argc, char** argv) {
     // Close the cv video capture context
     cv_capture.release();
     cv::destroyAllWindows();
-    
-    cudaGraphicsUnmapResources(1, &cimg_l);
-    cudaGraphicsUnmapResources(1, &cimg_r);
 
     // Disable all OpenGL buffer
     glDisableVertexAttribArray(Shader::ATTRIB_TEXTURE2D_POS);

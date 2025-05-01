@@ -46,7 +46,7 @@ class HDMCalibrator:
         return hdm_output_angle
 
 def update_inputs(inputs, katvr: KATVRInputs, hdm_calibrator: HDMCalibrator):
-    hdm_yaw = inputs[0]  # Still in radians, from -π/2 to π/2, inverted
+    hdm_yaw = inputs[0]  # In radians, from -π to π, inverted
 
     if katvr.requires_calibration:
         hdm_calibrator.calibrate(katvr.yaw, hdm_yaw)
