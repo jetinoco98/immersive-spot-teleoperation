@@ -76,33 +76,34 @@ GLchar* OVR_ZED_FS =
 void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
 {
     if (image.empty()) {
-        std::cout << "image empty" << std::endl;
+        std::cout << "Image is empty" << std::endl;
+        return;
     }
-    else {
-        //glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-        glGenTextures(1, &imageTexture);
-        glBindTexture(GL_TEXTURE_2D, imageTexture);
 
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // Convert from BGR to RGB once if needed
+    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
 
-        // Set texture clamping method
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    glGenTextures(1, &imageTexture);
+    glBindTexture(GL_TEXTURE_2D, imageTexture);
 
-        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 
-        glTexImage2D(GL_TEXTURE_2D,         // Type of texture
-            0,                   // Pyramid level (for mip-mapping) - 0 is the top level
-            GL_RGB,              // Internal colour format to convert to
-            image.cols,          // Image width  i.e. 640 for Kinect in standard mode
-            image.rows,          // Image height i.e. 480 for Kinect in standard mode
-            0,                   // Border width in pixels (can either be 1 or 0)
-            GL_RGB,              // Input image format (i.e. GL_RGB, GL_RGBA, GL_BGR etc.)
-            GL_UNSIGNED_BYTE,    // Image data type
-            image.ptr());        // The actual image data itself
-    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGB,
+                 image.cols,
+                 image.rows,
+                 0,
+                 GL_RGB,
+                 GL_UNSIGNED_BYTE,
+                 image.ptr());
+
+    glBindTexture(GL_TEXTURE_2D, 0); // Optional: unbind for safety
 }
 
 // ===================================================
@@ -211,6 +212,7 @@ int main(int argc, char* argv[])  {
 
     std::string ip_address = config.value("ip", "48.209.18.239");
     std::string stream_address = config.value("stream_address", "48.209.18.239:8554/spot-stream");
+    bool use_katvr = config.value("use_katvr", false); // Default to false if not specified
 
 
     // Initialize SDL2's context
@@ -251,7 +253,8 @@ int main(int argc, char* argv[])  {
     ThreadData thread_data;
 
     // Create the OpenCV video capture
-    std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=BGR ! appsink";
+    // std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=BGR ! appsink";
+    std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=100 ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! appsink";
     cv::VideoCapture cv_capture(pipeline, cv::CAP_GSTREAMER);
 
     // Check if the video stream is opened successfully
@@ -285,6 +288,8 @@ int main(int argc, char* argv[])  {
     ovrInputState InputState;
     ovrInputState LastInputState;
     float robot_stand = 0.0;
+    float calibrate_vr = 0.0;
+
     // Get the texture sizes of Oculus eyes
     ovrSizei textureSize0 = ovr_GetFovTextureSize(session, ovrEye_Left, hmdDesc.DefaultEyeFov[0], pixel_density);
     ovrSizei textureSize1 = ovr_GetFovTextureSize(session, ovrEye_Right, hmdDesc.DefaultEyeFov[1], pixel_density);
@@ -468,17 +473,38 @@ int main(int argc, char* argv[])  {
     // Launch capture video thread
     std::thread runner(__capture_runner__, std::ref(thread_data), cv_capture);
 
-    // Execute python script
-	printf("Executing python script...\n");
-	char currentDir[MAX_PATH];
-	GetCurrentDirectory(MAX_PATH, currentDir);
-	printf(currentDir);
-	const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_client.py ";
-	std::string command = "start cmd /k python " + std::string(currentDir) + std::string(pythonScript) + ip_address;
-	if (system(command.c_str()) != 0) {
-		std::cerr << "Error executing Python script" << std::endl;
-		return 1;
-	}
+    // Execute python scripts
+    printf("Executing oculus_client.py script...\n");
+    char currentDir[MAX_PATH];
+    GetCurrentDirectory(MAX_PATH, currentDir);
+    printf(currentDir);
+
+    const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_client.py ";
+    std::string command = "start cmd /k python \""
+                        + std::string(currentDir) 
+                        + std::string(pythonScript) 
+                        + "\" " + ip_address;
+
+    if (system(command.c_str()) != 0) {
+        std::cerr << "Error executing Oculus Python script" << std::endl;
+        return 1;
+    }
+
+    // Execute additional python scripts
+    if (use_katvr) {
+        printf("Executing katvr_main.py script...\n");
+        
+        const char* katvrScript = "\\..\\..\\scripts\\katvr\\katvr_main.py ";
+        std::string katvrCommand = "start cmd /k python \""
+                                + std::string(currentDir) 
+                                + std::string(katvrScript) 
+                                + "\"";
+
+        if (system(katvrCommand.c_str()) != 0) {
+            std::cerr << "Error executing KATVR Python script" << std::endl;
+            return 1;
+        }
+    }
 
 	// Initialize ZMQ Socket
     zmq::context_t zmq_context(1);
@@ -642,18 +668,32 @@ int main(int argc, char* argv[])  {
         bool wasButtonPressed_B = ((LastInputState.Buttons & ovrButton_B) != 0);
         bool justPressedB = (!wasButtonPressed_B && buttonPressed_B);
 
+        float rightTrigger = InputState.IndexTrigger[ovrHand_Right];
+        float lastRightTrigger = LastInputState.IndexTrigger[ovrHand_Right];
+        bool justPressedTrigger = (lastRightTrigger < 0.5 && rightTrigger >= 0.5);
+
         if (justPressedA && !robot_stand) robot_stand = 1.0;
         if (justPressedB && robot_stand) robot_stand = 0.0;
 
+        if (justPressedTrigger) {calibrate_vr = 1.0f;} 
+        else {calibrate_vr = 0.0f;}
+
         orientation = quaternionToRPY(ts);
 
-        float data[] = { orientation.yaw, -orientation.pitch, -orientation.roll, 
-            leftStick.y, leftStick.x, rightStick.x, robot_stand};
+        float data[] = {orientation.yaw, -orientation.pitch, -orientation.roll, 
+            leftStick.y, leftStick.x, rightStick.x, robot_stand, calibrate_vr};
 
         printf(
-            " HMD Ang (YPR): %4.2f  %4.2f  %4.2f, %4.2f\n",
-            data[0], data[1], data[2], data[6]);
-
+            "Yaw: %6.2f | Pitch: %6.2f | Roll: %6.2f | LS(Y: %5.2f, X: %5.2f) | RS(X: %5.2f) | STAND: %.1f | CALIBRATE: %.1f\n",
+            orientation.yaw,
+            -orientation.pitch,
+            -orientation.roll,
+            leftStick.y,
+            leftStick.x,
+            rightStick.x,
+            robot_stand,
+            calibrate_vr
+        );
 
 		// ===================================================
         // Send HDM data over ZeroMQ socket

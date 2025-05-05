@@ -64,10 +64,7 @@ target_link_libraries(check_libraries PRIVATE core_lib)
 target_link_libraries(hdm_test PRIVATE core_lib)
 
 
-# -- DLL Copy Automation --
-# Define the target DLL output folder (Release or Debug)
-set(DLL_OUTPUT_DIR "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
-
+# -- DLL File Copy --
 # Copy all DLLs from the 'dlls' folder into the output directory after build
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -76,4 +73,9 @@ add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
 )
 
 # -- JSON File Copy --
-configure_file(config.json config.json COPYONLY)
+# Copy config.json from the source directory to the build directory
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/config.json"
+            "${CMAKE_BINARY_DIR}/Release/config.json"
+) 

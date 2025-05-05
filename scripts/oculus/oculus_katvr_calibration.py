@@ -52,7 +52,8 @@ def update_inputs(inputs, katvr: KATVRInputs, hdm_calibrator: HDMCalibrator):
         hdm_calibrator.calibrate(katvr.yaw, hdm_yaw)
         katvr.requires_calibration = False
 
-    new_inputs = [0, 0, 0, 0, 0, 0]
+    # Create a list of zeroes with length 7
+    new_inputs = [0] * 7
 
     new_inputs[0] = hdm_calibrator.get_hdm_relative_angle(katvr.yaw, hdm_yaw)
     new_inputs[1] = inputs[1]
@@ -60,5 +61,6 @@ def update_inputs(inputs, katvr: KATVRInputs, hdm_calibrator: HDMCalibrator):
     new_inputs[3] = katvr.move
     new_inputs[4] = 0  # Sideway movement not implemented
     new_inputs[5] = katvr.turn
+    new_inputs[6] = inputs[6]
 
     return new_inputs

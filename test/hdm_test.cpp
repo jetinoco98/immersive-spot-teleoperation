@@ -1,6 +1,7 @@
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <windows.h>
 
 #include <Extras/OVR_Math.h>
 #include <OVR_CAPI.h>
@@ -76,10 +77,11 @@ int main() {
     
     // Execute python script
 	printf("Executing python script...\n");
-	std::string currentDir = "hdm_test";
+	char currentDir[MAX_PATH];
+	GetCurrentDirectory(MAX_PATH, currentDir);
     std::string ip_address = "48.209.18.239";
-	const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_client.py ";
-	std::string command = "start cmd /k python " + std::string(currentDir) + std::string(pythonScript) + ip_address;
+	const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_test.py ";
+    std::string command = "start cmd /k python " + std::string(currentDir) + std::string(pythonScript);
     system(command.c_str());
 
 
@@ -89,7 +91,8 @@ int main() {
         // Query the HMD for ts current tracking state.
 
         ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
-        ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
+        ovrResult inputResult = ovr_GetInputState(session, ovrControllerType_Active, &InputState);
+
         ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
         ovrVector2f leftStick = InputState.Thumbstick[ovrHand_Left];
         const float radialDeadZone = 0.5;
@@ -107,16 +110,25 @@ int main() {
 
         if (justPressedA && !robot_stand) robot_stand = 1.0;
         if (justPressedB && robot_stand) robot_stand = 0.0;
-
+        
         orientation = quaternionToRPY_FullYaw(ts);
 
-        float data[] = { orientation.yaw, -orientation.pitch, -orientation.roll, 
+        float data[] = {orientation.yaw, -orientation.pitch, -orientation.roll, 
             leftStick.y, leftStick.x, rightStick.x, robot_stand};
 
         printf(
-            " HMD Ang (YPR): %4.2f  %4.2f  %4.2f, %4.2f\n",
-            data[0], data[1], data[2], data[6]);
-
+            "Yaw: %6.2f | Pitch: %6.2f | Roll: %6.2f | LS(Y: %5.2f, X: %5.2f) | RS(X: %5.2f) | A: %d | B: %d | robot_stand: %.1f\n",
+            orientation.yaw,
+            -orientation.pitch,
+            -orientation.roll,
+            leftStick.y,
+            leftStick.x,
+            rightStick.x,
+            buttonPressed_A,
+            buttonPressed_B,
+            robot_stand 
+        );
+            
         LastInputState = InputState;
 
         // ===================================================
@@ -138,6 +150,5 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     
-
     return 0;
 }

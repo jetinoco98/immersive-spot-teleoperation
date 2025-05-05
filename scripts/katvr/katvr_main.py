@@ -200,9 +200,8 @@ def share_katvr_data():
 def print_katvr_frequency():
     global katvr
     while True:
-        print(katvr.frequency) if katvr.frequency > 0 else None
+        print(f"Frequency: {katvr.frequency}") if katvr.frequency > 0 else None
         katvr.frequency = 0
-        # Set a frequency of 1Hz
         time.sleep(1)
 
 
@@ -219,15 +218,13 @@ threading.Thread(target=share_katvr_data, daemon=True).start()
 
 # For testing purposes
 # if there is lag in Unreal Engine, the frequency will be lower than 60.
-# threading.Thread(target=print_katvr_frequency, daemon=True).start()
+threading.Thread(target=print_katvr_frequency, daemon=True).start()
 
 while True:
     try:
-        # Calibrate (KATVR - HDM) with command "c"
-        command = input("Enter a command: ")
-        if command == "c":
-            katvr.requires_hdm_calibration = True
+        # Print the angle, turn and move controls of KATVR on the same line
+        print(f"KATVR | Angle: {katvr.yaw:.2f}, Turn: {control.turn:.2f}, Move: {control.move:.2f}")
+        time.sleep(0.2)
     except KeyboardInterrupt:
         print("\nExiting...")
-        exit()
-    
+        break
