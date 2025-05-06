@@ -254,7 +254,9 @@ int main(int argc, char* argv[])  {
 
     // Create the OpenCV video capture
     // std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=0 ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! video/x-raw,width=1280,height=360,format=BGR ! appsink";
-    std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=100 ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! appsink";
+    // std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=100 ! rtph264depay ! h264parse ! nvh264dec ! videoconvert ! appsink";
+    std::string pipeline = "rtspsrc location=rtsp://" + stream_address + " latency=100 ! rtph264depay ! h264parse ! decodebin ! videoconvert ! video/x-raw, format=BGR ! appsink";
+
     cv::VideoCapture cv_capture(pipeline, cv::CAP_GSTREAMER);
 
     // Check if the video stream is opened successfully

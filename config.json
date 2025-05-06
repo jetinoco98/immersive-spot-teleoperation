@@ -2,5 +2,5 @@
     "ip": "48.209.18.239",
     "stream_address": "48.209.18.239:8554/spot-stream",
     "_comment": "Use true or false for the following parameters",
-    "use_katvr": true
+    "use_katvr": false
 }

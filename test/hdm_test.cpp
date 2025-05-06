@@ -45,23 +45,35 @@ RPY quaternionToRPY_FullYaw(ovrTrackingState ts) {
 
 int main() {
 
-    printf("Initializing...\n");
+    // Execute python scripts
+    printf("Executing oculus_client.py script...\n");
+    char currentDir[MAX_PATH];
+    GetCurrentDirectory(MAX_PATH, currentDir);
+    printf(currentDir);
+
+    const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_test.py ";
+    std::string command = "start cmd /k python \""
+                        + std::string(currentDir) 
+                        + std::string(pythonScript);
 
     // Initialize ZMQ Socket
+    printf("Initializing ZMQ Socket...\n");
     zmq::context_t zmq_context(1);
     zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
     publisher.connect("tcp://localhost:5555");
 
     // Initialize libOVR (Oculus SDK)
+    printf("Initializing Oculus SDK...\n");
     ovrResult result = ovr_Initialize(nullptr);
     if (OVR_FAILURE(result)) {
-        printf("ERROR: Failed to initialize libOVR");
+        printf("ERROR: Failed to initialize Oculus SDK");
         return -1;
     }
 
     ovrSession session;
     ovrGraphicsLuid luid;
     // Connect to the Oculus headset
+    printf("Connecting to Oculus Rift...\n");
     result = ovr_Create(&session, &luid);
     if (OVR_FAILURE(result)) {
         printf("ERROR: Oculus Rift not detected");
@@ -74,17 +86,8 @@ int main() {
     float robot_stand = 0.0;
 
     RPY orientation;
-    
-    // Execute python script
-	printf("Executing python script...\n");
-	char currentDir[MAX_PATH];
-	GetCurrentDirectory(MAX_PATH, currentDir);
-    std::string ip_address = "48.209.18.239";
-	const char* pythonScript = "\\..\\..\\scripts\\oculus\\oculus_test.py ";
-    std::string command = "start cmd /k python " + std::string(currentDir) + std::string(pythonScript);
-    system(command.c_str());
 
-
+    printf("Starting main loop...\n");
     while (true) {
         
         // ===================================================
