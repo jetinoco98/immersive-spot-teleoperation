@@ -37,7 +37,7 @@ class Controller:
         lqr.setup()
         return lqr
     
-    def get_setpoints(self, setpoints):
+    def compute_setpoints(self, setpoints):
         self.setpoints = np.array([[setpoints[0]], [setpoints[1]]])
 
     def get_simulator(self, model):
@@ -49,43 +49,31 @@ class Controller:
         simulator.setup()
         return simulator
     
-    def get_touch_controls(self, setpoints):
-        touch_controls = []
-        if abs(setpoints[0]) > INPUT_TRESHOLD:
-            if setpoints[0] > 0:
-                touch_controls.append(VELOCITY_BASE_SPEED)
-            else:
-                touch_controls.append(-VELOCITY_BASE_SPEED)
-        else:
-            touch_controls.append(0)
-
-        if abs(setpoints[1]) > INPUT_TRESHOLD:
-            if setpoints[1] > 0:
-                touch_controls.append(-VELOCITY_BASE_SPEED)
-            else:
-                touch_controls.append(VELOCITY_BASE_SPEED)
-        else:
-            touch_controls.append(0)
-
-        if abs(setpoints[2]) > INPUT_TRESHOLD:
-            if setpoints[2] > 0:
-                touch_controls.append(-VELOCITY_BASE_ANGULAR)
-            else:
-                touch_controls.append(VELOCITY_BASE_ANGULAR)
-        else:
-            touch_controls.append(0)
+    def compute_control(value, base_speed):
+        if abs(value) > INPUT_TRESHOLD:
+            return base_speed if value > 0 else -base_speed
+        return 0
     
+    def get_touch_controls(self, setpoints):
+        touch_controls = [
+            self.compute_control(setpoints[0], VELOCITY_BASE_SPEED),
+            self.compute_control(setpoints[1], -VELOCITY_BASE_SPEED),
+            self.compute_control(setpoints[2], -VELOCITY_BASE_ANGULAR),
+        ]
         return touch_controls
     
-    def get_hmd_controls(self, measures):
-        hmd_controls = []
+    def get_hmd_controls(self, hmd_inputs, measures):
+        self.compute_setpoints(hmd_inputs)
         self.lqr.set_setpoint(xss=self.setpoints)
         x = np.array([[measures[0]],[measures[1]]])
         u = self.lqr.make_step(x)
+        # Create the control list
+        hmd_controls = []
         hmd_controls.append(round(u[0][0], 3))
         hmd_controls.append(round(u[1][0], 3))
         hmd_controls.append(0)
         return hmd_controls
+
 
 if __name__ == '__main__':
     print(" LQR sample")

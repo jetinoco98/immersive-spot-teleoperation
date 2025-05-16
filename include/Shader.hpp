@@ -1,6 +1,9 @@
 #pragma once
 #include <GL/glew.h>
 
+extern GLchar* OVR_ZED_VS;
+extern GLchar* OVR_ZED_FS;
+
 class Shader {
 public:
     Shader(GLchar* vs, GLchar* fs);

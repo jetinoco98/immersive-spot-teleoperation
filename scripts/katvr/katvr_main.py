@@ -1,230 +1,150 @@
-from katvr_osc_sockets import send_osc_message, start_osc_server
+from osc_server import start_osc_server
 import threading
 import time
 import math
 import zmq
 import json
 
-# --- GLOBAL CONSTANTS ---
-CONTROL_TYPE = "open"
 
-# --- ZMQ Init ---
+# --- CLASSES ---
+class KATVR:
+    def __init__(self):
+        # KATVR device properties
+        self.previous_yaw = None
+        self.yaw = 0
+        self.current_delta_time = None
+        self.forward_velocity = 0
+        self.forward_velocity_normalized = 0
+        self.angular_velocity = 0
+        self.angular_velocity_clamped = 0  
+        # Additional properties
+        self.is_active = False
+
+    # --- INTERNAL METHODS ---
+    def apply_special_yaw_correction(self):
+        """
+        Corrects the yaw value obtained from KATVR by applying an offset of 90°.
+        Updates the self.yaw property.
+        """
+        offset = 90
+        self.yaw = (self.yaw - offset + 180) % 360 - 180
+
+    def compute_forward_velocity_normalized(self, threshold=0.7, velocity_change_limit=2.5, normal_velocity=0.5, high_velocity=1.0):
+        """ 
+        Normalizes the forward velocity from the KATVR device to a range suitable for the Spot robot.
+        Updates the self.forward_velocity_normalized property.
+        """
+        if abs(self.forward_velocity) < threshold:
+            self.forward_velocity_normalized = 0.0
+        elif threshold <= abs(self.forward_velocity) < velocity_change_limit:
+            self.forward_velocity_normalized = normal_velocity if self.forward_velocity > 0 else -normal_velocity
+        else:
+            self.forward_velocity_normalized = high_velocity if self.forward_velocity > 0 else -high_velocity
+        
+    def compute_angular_velocity(self):
+        """
+        Computes the angular velocity in radians per second based on the change in angle.
+        Updates the self.angular_velocity property.
+        """
+        if self.previous_yaw is None:
+            self.angular_velocity = 0.0
+            return
+
+        # Calculate the difference
+        delta_angle = self.yaw - self.previous_yaw
+        # Normalize the angle difference to the range [-180, 180]
+        delta_angle = (delta_angle + 180) % 360 - 180
+        # Compute angular velocity
+        angular_velocity_deg = delta_angle / self.current_delta_time
+        # Convert to radians
+        self.angular_velocity = math.radians(angular_velocity_deg)
+
+    def clamp_angular_velocity(self, max_angular_velocity=1.5):
+        """
+        Clamps the angular velocity to a specified maximum value.
+        Updates the self.angular_velocity_clamped property.
+        """
+        if abs(self.angular_velocity) > max_angular_velocity:
+            self.angular_velocity_clamped = math.copysign(max_angular_velocity, self.angular_velocity)
+        else:
+            self.angular_velocity_clamped = self.angular_velocity
+
+    def process_internal_values(self):
+        """
+        Processes the values obtained from the KATVR device.
+        This method is called in the main loop to update the KATVR properties.
+        """
+        
+        # Offset the yaw to coincide with the KAT Device Simulator
+        self.apply_special_yaw_correction()
+
+        # Compute the angular velocity
+        self.compute_angular_velocity()
+
+        # Normalize forward velocity
+        self.compute_forward_velocity_normalized()
+
+        # Clamp angular velocity
+        self.clamp_angular_velocity()
+
+        # Update previous yaw
+        self.previous_yaw = self.yaw
+    
+
+# --- MESSAGE HANDLING AND PROCESSING ---
+def send_to_oculus_client():
+    data = {
+        "yaw": round(float(katvr.yaw), 2),
+        "vel": round(float(katvr.forward_velocity_normalized), 2),
+        "ang_vel": round(float(katvr.angular_velocity_clamped), 2),
+    }
+
+    serialized_data = json.dumps(data).encode('utf-8')
+    topic = "from_katvr"
+    socket.send_string(topic, zmq.SNDMORE)
+    socket.send(serialized_data)
+
+
+def message_handler(address, *args):
+    if address != "/katvr":
+        print(f"Received message from unknown address: {address}")
+        return
+
+    if not katvr.is_active:
+        katvr.is_active = True
+        print("KATVR connection established.")
+
+    katvr.current_delta_time, katvr.yaw, katvr.forward_velocity = args
+    katvr.process_internal_values()
+
+    # Send the values to the Oculus client
+    send_to_oculus_client()
+
+
+
+# --- MAIN ---
+
+#  ZMQ Init 
 context = zmq.Context()
 socket = context.socket(zmq.PUB)
 socket.connect("tcp://localhost:5555")
 
-# --- HELPER FUNCTIONS ---
-def shift_angle(angle, offset):
-    shifted = angle - offset
-    # Wrap back to [-180, 180]
-    if shifted > 180:
-        shifted -= 360
-    elif shifted < -180:
-        shifted += 360
-    return shifted
+# Initialize KATVR instance to be used globally
+katvr = KATVR() 
 
-def speed_control(speed, low_range, med_range):
-    abs_speed = abs(speed)
-    if low_range <= abs_speed < med_range:
-        return 0.5 if speed >= 0 else -0.5
-    elif abs_speed >= med_range:
-        return 1.0 if speed >= 0 else -1.0
-    return 0.0
-
-
-# --- CLASS DEFINITIONS ---
-class KATVR:
-    def __init__(self, use_spot_simulation=False):
-        self.yaw = 0
-        self.move_speed = 0
-        self.frequency = 0
-        self.first_connection = False
-        self.requires_hdm_calibration = True
-        self.use_spot_simulation = use_spot_simulation
-
-    def __str__(self):
-        return f"yaw: {self.yaw}, move_speed: {self.move_speed}"
-
-
-class Control:
-    def __init__(self, turn=0, move=0):
-        self.turn = turn
-        self.move = move
-
-    def __str__(self):
-        return f"turn: {self.turn}, move: {self.move}"
-
-
-class TurnOpenLoopController:
-    DEG_TO_RAD = math.pi / 180
-    RAD_TO_DEG = 180 / math.pi
-
-    def __init__(self, smoothing_factor=0.2, spot_max_angular_velocity=1.5):
-        self.spot_max_angular_velocity = spot_max_angular_velocity
-        self.smoothing_factor = smoothing_factor
-        self.last_yaw = None
-        self.angular_velocity_smoothed = 0
-
-    def unwrap_angle(self, current, previous):
-        delta = current - previous
-        delta = (delta + 180) % 360 - 180 
-        return delta
-
-    def process(self, delta_time, yaw):
-        if self.last_yaw is None:
-            self.last_yaw = yaw
-            return [0, 0, 0]
-
-        delta_yaw = self.unwrap_angle(yaw, self.last_yaw)
-        raw_angular_velocity = delta_yaw / delta_time
-        self.last_yaw = yaw
-
-        # Apply smoothing
-        self.angular_velocity_smoothed = (
-            self.smoothing_factor * raw_angular_velocity +
-            (1 - self.smoothing_factor) * self.angular_velocity_smoothed
-        )
-
-        # Normalize control signal
-        control_signal = self.angular_velocity_smoothed / (self.RAD_TO_DEG * self.spot_max_angular_velocity)
-        control_signal = max(-1, min(1, control_signal))
-        if abs(control_signal) < 0.1:
-            control_signal = 0
-
-        angular_velocity_smoothed_rad = self.angular_velocity_smoothed * self.DEG_TO_RAD
-
-        return [control_signal, raw_angular_velocity, angular_velocity_smoothed_rad]
-
-
-class TurnClosedLoopController:
-    def __init__(self, kp, kd, deadband):
-        self.kp = kp
-        self.kd = kd
-        self.deadband = deadband
-        self.previous_error = 0
-
-    def normalize_angle(self, angle):
-        return (angle + 180) % 360 - 180
-
-    def process(self, delta_time, kat_yaw, spot_yaw):
-        kat_yaw = self.normalize_angle(kat_yaw)
-        spot_yaw = self.normalize_angle(spot_yaw)
-        error = self.normalize_angle(kat_yaw - spot_yaw)
-
-        if abs(error) < self.deadband:
-            return [0, error]
-
-        proportional = self.kp * error
-        derivative = self.kd * (error - self.previous_error) / delta_time if delta_time != 0 else 0
-        self.previous_error = error
-
-        control_signal = max(-1, min(1, proportional + derivative))
-
-        if abs(control_signal) < 0.1:
-            control_signal = 0
-
-        return [control_signal, error]
-
-
-
-# --- MESSAGE HANDLING ---
-def message_handler(address, *args):
-    global katvr, control, spot_yaw
-    katvr.frequency += 1
-    katvr.first_connection = True
-
-    if address == "/katvr":
-        delta_time, yaw, katvr.move_speed = args
-        # Offset the yaw to coincide with the KAT Device Simulator
-        katvr.yaw = shift_angle(yaw, 90)
-        katvr.yaw =  (-katvr.yaw) if abs(katvr.yaw) > 0 else katvr.yaw
-
-    # Only when using simulator and closed loop control
-    elif address == "/spot":
-        spot_yaw = args[0]
-        return
-
-    # Turn control
-    if CONTROL_TYPE == "open":
-        output_values = turn_open_loop.process(delta_time, katvr.yaw)
-        control.turn = output_values[0]
-        
-    elif CONTROL_TYPE == "closed" and katvr.yaw is not None:
-        output_values = turn_closed_loop.process(delta_time, katvr.yaw, spot_yaw)
-        control.turn = output_values[0]
-    
-    # Movement control
-    control.move = speed_control(katvr.move_speed, 0.7, 3.0)
-
-    # print("Received message:", address, args)
-
-
-# --- SEND DATA TO OCULUS CLIENT ---
-def send_to_oculus_client():
-
-    data = {
-        "turn": round(float(control.turn), 2),
-        "move": round(float(control.move), 2),
-        "yaw": round(float(katvr.yaw), 2),
-        "calibration": False
-    }
-
-    if katvr.requires_hdm_calibration:
-        data["calibration"] = True
-        katvr.requires_hdm_calibration = False
-
-    serialized_data = json.dumps(data).encode('utf-8')
-
-    topic = "from_katvr"
-    socket.send_string(topic, zmq.SNDMORE)
-    socket.send(serialized_data)
-        
-
-# --- SENDER LOGIC ---
-def share_katvr_data():
-    global katvr, control
-    while True:
-        if not katvr.first_connection:
-            time.sleep(0.5)
-            continue
-
-        if katvr.use_spot_simulation:
-            send_osc_message([float(control.turn), float(control.move)])
-        else:
-            send_to_oculus_client()
-        # Set a frequency of 20Hz
-        time.sleep(0.05)
-
-
-# --- OPTIONAL: PRINT KATVR FREQUENCY ---
-def print_katvr_frequency():
-    global katvr
-    while True:
-        print(f"Frequency: {katvr.frequency}") if katvr.frequency > 0 else None
-        katvr.frequency = 0
-        time.sleep(1)
-
-
-# --- MAIN ---
-katvr = KATVR(use_spot_simulation=False)
-control = Control()
-turn_open_loop = TurnOpenLoopController()
-turn_closed_loop = TurnClosedLoopController(kp=0.2, kd=0.0, deadband=1.0)
-spot_yaw = 0
-
-# Start threads
+# Start the OSC UDP Socket server in a separate thread
 threading.Thread(target=start_osc_server, args=(message_handler,), daemon=True).start()
-threading.Thread(target=share_katvr_data, daemon=True).start()
-
-# For testing purposes
-# if there is lag in Unreal Engine, the frequency will be lower than 60.
-threading.Thread(target=print_katvr_frequency, daemon=True).start()
 
 while True:
     try:
-        # Print the angle, turn and move controls of KATVR on the same line
-        print(f"KATVR | Angle: {katvr.yaw:.2f}, Turn: {control.turn:.2f}, Move: {control.move:.2f}")
-        time.sleep(0.2)
+        if katvr.is_active:
+            print(
+                f"YAW: {katvr.yaw:.2f}° | "
+                f"Forward Velocity: {katvr.forward_velocity:.2f} m/s ({katvr.forward_velocity_normalized:.2f}) | "
+                f"Angular Velocity: {katvr.angular_velocity:.2f} rad/s ({katvr.angular_velocity_clamped:.2f})",
+                end="        \r"
+            )
+        time.sleep(0.05)
     except KeyboardInterrupt:
         print("\nExiting...")
         break

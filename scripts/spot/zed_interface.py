@@ -43,3 +43,5 @@ class ZEDInterface :
         self.zed.close()
         print("\nShutting down ZEDInterface.")
 
+
+zed = ZEDInterface()

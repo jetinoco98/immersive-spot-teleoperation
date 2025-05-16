@@ -10,41 +10,67 @@ import zmq
 import json
 import struct
 import threading
-from oculus_katvr_calibration import KATVRInputs, HDMCalibrator, update_inputs
+from oculus_katvr_calibration import KATVRCalibration
 
 
-# -- New global variables --
-katvr = KATVRInputs()
-hdm_calibrator = HDMCalibrator()
-inputs = [0] * 8
+# -- OCULUS CLIENT --
+port = 1883
+topic = "spot/inputs"
+
+class OculusClient:
+    def __init__(self, broker_address):
+        self.broker_address = broker_address
+        self.client = mqtt.Client()
+        self.client.on_connect = self.on_connect
+        self.client.connect(self.broker_address, port)
+        self.client.loop_start()
+    def on_connect(self, client, userdata, flags, rc):
+        print("Connected with result code " + str(rc))
 
 
-# -- New functions for receiving data --
+# -- Global variables --
+katvr = KATVRCalibration()
+last_katvr_message_time = time.time()
+inputs = []
+
+''' 
+The inputs list received from the Meta Quest is expected to be in the following format:
+0. HDM Yaw (radians)
+1. HDM Pitch (radians)
+2. HDM Roll (radians)
+3. Left Controller Y (0-1)
+4. Left Controller X (0-1)
+5. Right Controller X (0-1)
+6. Command: Stand/Sit, from buttons A or B
+7. Command: Calibration, from right index finger trigger -> Exclusive for KATVR logic
+8. Command: Alignment, from right middle finger trigger -> Exclusive for KATVR logic
+'''
+
+
+# -- Functions for receiving data --
 def katvr_data_processor(message):
-    global katvr
-
-    data = json.loads(message.decode('utf-8'))
-
+    global katvr, last_katvr_message_time
     katvr.is_active = True
-    katvr.turn = data["turn"]
-    katvr.move = data["move"]
+
+    # Update the last received time
+    last_katvr_message_time = time.time()
+
+    # Decode the message
+    data = json.loads(message.decode('utf-8'))
     katvr.yaw = data["yaw"]
-
-    if data["calibration"] == True:
-        katvr.requires_calibration = True
-
+    katvr.forward_velocity = data["vel"]
+    katvr.angular_velocity = data["ang_vel"]
 
 def hdm_data_processor(message):
     global inputs, katvr
     try:
-        inputs = list(struct.unpack('8f', message))
-        # Check for calibration on the last input from HDM
-        if inputs[-1] == 1:
+        inputs = list(struct.unpack('9f', message))
+        # Check for calibration on the index #7 of the inputs list
+        if inputs[7] == 1:
             print("Received calibration request from HDM")
-            katvr.requires_calibration = True
+            katvr.requires_hdm_calibration = True
     except:
         print("Error in incoming message format")
-
 
 def receive_from_zmq():
     context = zmq.Context()
@@ -65,42 +91,67 @@ def receive_from_zmq():
             katvr_data_processor(message)
 
 
-# -- OCULUS CLIENT ORIGINAL CODE --
-port = 1883
-topic = "oculus/inputs"
-
-class OculusClient:
-    def __init__(self, broker_address):
-        self.broker_address = broker_address
-        self.client = mqtt.Client()
-        self.client.on_connect = self.on_connect
-        self.client.connect(self.broker_address, port)
-        self.client.loop_start()
-    def on_connect(self, client, userdata, flags, rc):
-        print("Connected with result code " + str(rc))
+# -- Additional functions --
+def monitor_katvr_activity():
+    global katvr, last_katvr_message_time
+    while True:
+        # Check if more than 1 second has passed since the last KATVR message
+        if time.time() - last_katvr_message_time > 1:
+            katvr.is_active = False
+        time.sleep(0.1)  # Check every 100ms
 
 
 # -- MAIN FUNCTION --
 def main(broker_address):
     oculus = OculusClient(broker_address)
 
-    # Listen to incoming messages
+    # Start the ZMQ receiver thread
     threading.Thread(target=receive_from_zmq, daemon=True).start()
+    # Start the KATVR activity monitor thread
+    threading.Thread(target=monitor_katvr_activity, daemon=True).start()
 
     try:
         while True:
-            # Inputs from HDM, except the last one in the list
-            final_inputs = inputs[:-1]
-
-            # Update to KATVR inputs when active
+            # Use the KATVR related inputs when active
             if katvr.is_active:
-                final_inputs = update_inputs(inputs, katvr, hdm_calibrator)
+                inputs_alternative = katvr.create_alternative_inputs(inputs)
+                print("Alternative Inputs:", [f"{x:.2f}" for x in inputs_alternative])
 
-            print("Inputs:", [f"{x:.2f}" for x in final_inputs])
-                
-            # Publish the inputs through MQTT
-            payload = json.dumps(final_inputs)
-            oculus.client.publish(topic, payload)
+                """
+                The inputs_alternative list is expected to be in the following format:
+                0. Relative HDM Yaw (radians)
+                1. HDM Pitch (radians)
+                2. HDM Roll (radians)
+                3. KATVR Yaw (degrees)
+                4. KATVR Forward Velocity (m/s)
+                5. Command: Stand/Sit
+                6. Command: Alignment
+                """
+                    
+                # Publish the inputs through MQTT
+                payload = json.dumps(inputs_alternative)
+                new_topic = "spot/inputs2"
+                oculus.client.publish(new_topic, payload)
+            
+            else:
+                # Get the inputs from index #0 to #6
+                inputs_standard = inputs[:7]
+                print("Standard Inputs:", [f"{x:.2f}" for x in inputs_standard])
+
+                """
+                The inputs_standard list is expected to be in the following format:
+                0. HDM Yaw (radians)
+                1. HDM Pitch (radians)
+                2. HDM Roll (radians)
+                3. Left Controller Y (0-1)
+                4. Left Controller X (0-1)
+                5. Right Controller X (0-1)
+                6. Command: Stand/Sit
+                """
+
+                # Publish the inputs through MQTT
+                payload = json.dumps(inputs_standard)
+                oculus.client.publish(topic, payload)
 
             # Frequency of 20Hz
             time.sleep(0.05)
@@ -115,13 +166,13 @@ def main(broker_address):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Send video stream to RTSP server")
+    parser = argparse.ArgumentParser(description="Send control data to the MQTT server")
     parser.add_argument(
         'ip_address',
         type=str,
         nargs='?',
         default='34.16.188.15',  
-        help='The IP address of the RTSP server'
+        help='The IP address of the MQTT server'
     )
     args = parser.parse_args()
     main(args.ip_address)

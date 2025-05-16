@@ -1,66 +1,57 @@
 import math
 
-class KATVRInputs:
+class KATVRCalibration:
     def __init__(self):
-        self.turn = 0
-        self.move = 0
+        # KATVR device properties
         self.yaw = None
+        self.forward_velocity = None
+        self.angular_velocity = None
+        # KATVR status properties
         self.is_active = False
-        self.requires_calibration = False
-
-class HDMCalibrator:
-    def __init__(self):
+        # Calibration properties
+        self.requires_hdm_calibration = False
+        self.hdm_yaw = None
         self.offset = 0
 
+    # --- HELPER FUNCTIONS ---
     def normalize_angle(self, angle):
         return ((angle + 180) % 360) - 180
 
-    def calibrate(self, kat_angle, hdm_angle):
+    # --- INTERNAL METHODS ---
+    def calibrate_with_hdm(self):
         """
         Calibrate using current platform and head-mounted display angles.
-        Assumes the user is facing forward in both systems.
-        HDM angle is in radians and needs to be converted.
+        Assumes the user is facing forward.
         """
-        hdm_angle_deg = -math.degrees(hdm_angle)  # Convert to degrees and invert sign
-
-        kat_angle = self.normalize_angle(kat_angle)
-        hdm_angle_deg = self.normalize_angle(hdm_angle_deg)
-
-        self.offset = self.normalize_angle(hdm_angle_deg - kat_angle)
+        self.offset = self.normalize_angle(self.hdm_yaw - self.yaw)
         print(f"Calibrated HDM/KATVR with offset: {self.offset:.2f}°")
 
-    def get_hdm_relative_angle(self, kat_angle, hdm_angle):
+    def get_hdm_relative_angle(self):
         """
         Get the head-relative angle after calibration.
-        Converts the HDM input to degrees and inverts it for internal use,
-        then converts it back to the HDM format before returning.
+        Converts the HDM input back to radians.
         """
-        hdm_angle_deg = -math.degrees(hdm_angle)  # Convert to degrees and invert
+        relative_angle = self.normalize_angle(self.hdm_yaw - self.yaw - self.offset)
+        hdm_relative_angle_rad = math.radians(relative_angle)  # Convert to radians
+        return hdm_relative_angle_rad
 
-        kat_angle = self.normalize_angle(kat_angle)
-        hdm_angle_deg = self.normalize_angle(hdm_angle_deg)
+    def create_alternative_inputs(self, inputs):
+        self.hdm_yaw = inputs[0]  # In radians
+        self.hdm_yaw = math.degrees(self.hdm_yaw)  # Convert to degrees
+        self.hdm_yaw = self.normalize_angle(self.hdm_yaw)  # Normalize to [-180, 180]
 
-        relative_angle = self.normalize_angle(hdm_angle_deg - kat_angle - self.offset)
+        if self.requires_hdm_calibration:
+            self.calibrate_with_hdm()
+            self.requires_hdm_calibration = False
 
-        hdm_output_angle = -math.radians(relative_angle)  # Invert sign and convert to radians
-        return hdm_output_angle
+        inputs_alternative = [
+            self.get_hdm_relative_angle(),  # Relative HDM Yaw (radians)
+            inputs[1],  # HDM Pitch (radians)
+            inputs[2],  # HDM Roll (radians)
+            self.yaw,  # KATVR Yaw (degrees)
+            self.forward_velocity,  # KATVR Forward Velocity (m/s)
+            inputs[6],  # Command: Stand/Sit
+            inputs[8]   # Command: Alignment
+        ]
 
-def update_inputs(inputs, katvr: KATVRInputs, hdm_calibrator: HDMCalibrator):
-    hdm_yaw = inputs[0]  # In radians, from -π to π, inverted
-
-    if katvr.requires_calibration:
-        hdm_calibrator.calibrate(katvr.yaw, hdm_yaw)
-        katvr.requires_calibration = False
-
-    # Create a list of zeroes with length 7
-    new_inputs = [0] * 7
-
-    new_inputs[0] = hdm_calibrator.get_hdm_relative_angle(katvr.yaw, hdm_yaw)
-    new_inputs[1] = inputs[1]
-    new_inputs[2] = inputs[2]
-    new_inputs[3] = katvr.move
-    new_inputs[4] = 0  # Sideway movement not implemented
-    new_inputs[5] = katvr.turn
-    new_inputs[6] = inputs[6]
-
-    return new_inputs
+        return inputs_alternative

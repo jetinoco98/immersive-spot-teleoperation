@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(immersive_spot_teleoperation LANGUAGES CXX CUDA)
+project(immersive_spot_teleoperation LANGUAGES CXX)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -9,8 +9,9 @@ cmake_policy(SET CMP0146 NEW)
 
 # System Libraries
 find_package(OpenGL REQUIRED)
-find_package(ZED REQUIRED)  # User must install manually
-find_package(CUDAToolkit REQUIRED)  # User must install manually
+
+# find_package(ZED REQUIRED)  # User must install manually
+# find_package(CUDAToolkit REQUIRED)  # User must install manually
 
 # OpenCV binaries stored on the project external folder
 set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv")
@@ -27,8 +28,9 @@ target_include_directories(core_lib INTERFACE
     ${CMAKE_SOURCE_DIR}/external/glew/include
     ${CMAKE_SOURCE_DIR}/external/SDL2/include
     ${CMAKE_SOURCE_DIR}/external/ovr_sdk/LibOVR/Include
+    ${CMAKE_SOURCE_DIR}/external/json
     ${OpenCV_INCLUDE_DIRS}
-    ${ZED_INCLUDE_DIRS}
+    # ${ZED_INCLUDE_DIRS}
 )
 
 # Link directories
@@ -47,21 +49,15 @@ target_link_libraries(core_lib INTERFACE
     SDL2
     OpenGL::GL
     LibOVR
-    ${ZED_LIBRARIES}
-    CUDA::cudart
     ${OpenCV_LIBS}
+    # ${ZED_LIBRARIES}
+    # CUDA::cudart 
 )
 
 # Define the main executables
 set(CMAKE_WIN32_EXECUTABLE FALSE) # To ensure it's treated as a console application
-add_executable(${CMAKE_PROJECT_NAME} "src/main.cpp" "src/Shader.cpp")
+add_executable(${CMAKE_PROJECT_NAME} "src/main.cpp" "src/Shader.cpp" "src/OculusRenderer.cpp" "src/StreamCapture.cpp")
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE core_lib)
-
-# Define the test executables
-add_executable(check_libraries test/check_libraries.cpp)
-add_executable(hdm_test test/hdm_test.cpp)
-target_link_libraries(check_libraries PRIVATE core_lib)
-target_link_libraries(hdm_test PRIVATE core_lib)
 
 
 # -- DLL File Copy --

@@ -1,6 +1,45 @@
 #include "Shader.hpp"
 #include <iostream>
 
+// ===================================================
+// ----- SHADER STRINGS -----
+// ===================================================
+
+GLchar* OVR_ZED_VS =
+"#version 330 core\n \
+			layout(location=0) in vec3 in_vertex;\n \
+			layout(location=1) in vec2 in_texCoord;\n \
+			uniform uint isLeft; \n \
+			out vec2 b_coordTexture; \n \
+			void main()\n \
+			{\n \
+				if (isLeft == 1U)\n \
+				{\n \
+					b_coordTexture = in_texCoord;\n \
+					gl_Position = vec4(in_vertex.x, in_vertex.y, in_vertex.z,1);\n \
+				}\n \
+				else \n \
+				{\n \
+					b_coordTexture = vec2(1.0 - in_texCoord.x, in_texCoord.y);\n \
+					gl_Position = vec4(-in_vertex.x, in_vertex.y, in_vertex.z,1);\n \
+				}\n \
+			}";
+
+GLchar* OVR_ZED_FS =
+"#version 330 core\n \
+			uniform sampler2D u_textureZED; \n \
+			in vec2 b_coordTexture;\n \
+			out vec4 out_color; \n \
+			void main()\n \
+			{\n \
+				out_color = vec4(texture(u_textureZED, b_coordTexture).bgr,1); \n \
+			}";
+
+
+// ===================================================
+// ----- SHADER CLASS -----
+// ===================================================
+
 Shader::Shader(GLchar* vs, GLchar* fs) {
     if (!compile(verterxId_, GL_VERTEX_SHADER, vs)) {
         std::cout << "ERROR: while compiling vertex shader" << std::endl;

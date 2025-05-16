@@ -5,137 +5,220 @@ import cv2
 import json
 import paho.mqtt.client as mqtt
 import threading
-import numpy as np
 import socket
 import os
 import time
 from spot_interface import SpotInterface
 from zed_interface import ZEDInterface
-from spot_controller import Controller
+from input_controller import Controller
+
+
+def check_internet_connection():
+    try:
+        # Attempt to create a socket connection to Google's DNS server
+        socket.create_connection(("8.8.8.8", 53), timeout=15)
+        return True
+    except OSError:
+        return False
+
+def reconnect():
+    print("reconnecting...")
+    os.system("sudo systemctl restart simcom_wwan@wwan0.service")
+    time.sleep(5)
 
 class SpotClient:
-    def __init__(self, broker_address, image_source):
+    def __init__(self, broker_address):
         self.broker_address = broker_address
-        self.image_source = image_source
-        self.sub_topic = "oculus/inputs"
+        self.sub_topic_spot = "spot/inputs"
+        self.sub_topic_arm = "arm/inputs"
+        self.sub_topic_rtt = "spot/command"
+        self.pub_topic_rtt = "spot/response"
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.client.connect(self.broker_address, 1883)
         self.client.loop_start()
-        self.interface = SpotInterface(self.image_source)
+        self.robot_stand = False
         self.controller = Controller()
-        self.inputs = [0, 0, 0, 0, 0, 0]
-        self.flag_connected = 1
+        self.interface = SpotInterface()
         
+
     def on_connect(self, client, userdata, flags, rc):
         print("Connected with result code " + str(rc))
-        client.subscribe(self.sub_topic)
+        client.subscribe(self.sub_topic_spot)
+        client.subscribe(self.sub_topic_rtt)
+        #client.subscribe(self.sub_topic_arm)
+
+    
+    def process_stand_command(self, command):
+        """
+        Processes a stand or sit command for the robot.
+
+        Args:
+            command (float): The command to process. 
+                             Use 1.0 to make the robot stand and 0.0 to make it sit.
+
+        Returns:
+            bool: True if an interface call to stand or sit is made, otherwise False.
+        """
+        if command == 1.0 and not self.robot_stand:
+            self.interface.stand()
+            self.robot_stand = True
+            return True
+        elif command == 0.0 and self.robot_stand:
+            self.interface.sit()
+            self.robot_stand = False
+            return True
+        return False
+
 
     def on_message(self, client, userdata, msg):
-        payload = msg.payload.decode()
-        self.inputs = json.loads(payload)
-    
-    def check_internet_connection(self):
-        try:
-            # Attempt to create a socket connection to Google's DNS server
-            socket.create_connection(("8.8.8.8", 53), timeout=15)
-            return True
-        except OSError:
-            return False
-        
-    def reconnect(self):
-        os.system("sudo systemctl restart simcom_wwan@wwan0.service")
-        time.sleep(30)
-    
+
+        if msg.topic == self.sub_topic_spot:
+            # Decode the message payload
+            payload = msg.payload.decode()
+            inputs = json.loads(payload)
+
+            """
+            The inputs list from spot/inputs is expected to be in the following format:
+            0. HDM Yaw (radians)
+            1. HDM Pitch (radians)
+            2. HDM Roll (radians)
+            3. Left Controller Y (0-1)
+            4. Left Controller X (0-1)
+            5. Right Controller X (0-1)
+            6. Command: Stand/Sit
+            """
+            
+            hmd_inputs = inputs[0:3]
+            touch_inputs = inputs[3:6]
+            
+            # Update HDM inputs with LQR-optimized controls
+            spot_measures = self.interface.get_body_orientation()
+            hmd_controls = self.controller.get_hmd_controls(hmd_inputs, spot_measures)
+
+            # Update touch controls according to the designated thresholds on LQR Controller
+            touch_controls = self.controller.get_touch_controls(touch_inputs)
+
+            # Process the stand command
+            stand_command = inputs[6]
+            stand_command_processed = self.process_stand_command(stand_command)
+            
+            # Set the controls for the robot
+            if not stand_command_processed and self.robot_stand:
+                self.interface.set_hmd_controls(hmd_controls)
+                self.interface.set_touch_controls(touch_controls)
+
+        # -- Message received when KATVR is being used --
+        elif msg.topic == "spot/inputs2":
+            payload = msg.payload.decode()
+            inputs = json.loads(payload)
+
+            """
+            The inputs list from spot/inputs2 is expected to be in the following format:
+            0. Relative HDM Yaw (radians)
+            1. HDM Pitch (radians)
+            2. HDM Roll (radians)
+            3. KATVR Yaw (degrees)
+            4. KATVR Forward Velocity (m/s)
+            5. Command: Stand/Sit
+            6. Command: Alignment
+            """
+            
+            hmd_inputs = inputs[0:3]
+            # Update HDM inputs with LQR-optimized controls
+            spot_measures = self.interface.get_body_orientation()
+            hmd_controls = self.controller.get_hmd_controls(hmd_inputs, spot_measures)
+
+            # Process the stand command
+            stand_command = inputs[5]
+            stand_command_processed = self.process_stand_command(stand_command)
+
+            katvr_inputs = [
+                inputs[3],  # KATVR Yaw (degrees)
+                inputs[4],  # KATVR Forward Velocity (m/s)
+                inputs[6]   # Command: Alignment
+            ]
+
+            # Set the controls for the robot
+            if not stand_command_processed and self.robot_stand:
+                self.interface.set_hmd_controls(hmd_controls)
+                self.interface.set_katvr_inputs(katvr_inputs)
+
+
+        elif msg.topic == self.sub_topic_rtt:
+            command = msg.payload.decode()
+            client.publish(self.pub_topic_rtt, payload=command)
+
+        #elif msg.topic == self.sub_topic_arm:
+        #    payload = msg.payload.decode()
+        #    inputs = json.loads(payload)
+
+
     def control_loop(self):
         try:
-            while True: 
-                hmd_inputs = self.inputs[0:3]
-                self.controller.get_setpoints(hmd_inputs)
-                touch_inputs = self.inputs[3:6]
-                spot_measures = self.interface.get_body_orientation()
-                print(spot_measures)
-                hmd_controls = self.controller.get_hmd_controls(spot_measures)
-                touch_controls = self.controller.get_touch_controls(touch_inputs)
-                controls = hmd_controls + touch_controls
-                if self.flag_connected:
-                    self.interface.set_controls(controls)
-                else:
-                    self.reconnect()
-                self.flag_connected = self.check_internet_connection()
+            while True:
+                time.sleep(0.05)
+                
         except KeyboardInterrupt:
             pass
+
         finally:
             self.interface.shutdown()
             self.client.loop_stop()
             self.client.disconnect()
             print("Spot Client disconnected.")
-            
-def stream_loop_zed(broker_address, image_source):
+
+
+def stream_loop(broker_address):
     zed = ZEDInterface()
-    pipeline = 'appsrc ! videoconvert ! videoscale ! video/x-raw,format=GRAY8,width=1280,height=240,framerate=60/1 ! nvvidconv ! \
+    try:
+        #key = ' '
+        while True:
+            pipeline = 'appsrc ! videoconvert ! videoscale ! video/x-raw,format=YUY2,width=1280,height=360,framerate=60/1 ! nvvidconv ! \
                             nvv4l2h264enc bitrate=3000000 ! video/x-h264, \
                             stream-format=byte-stream ! \
-                            rtspclientsink protocols=tcp location=rtsp://%s:8554/spot-stream' % broker_address
-    image_size = (1280, 240)
-    
-    out_send = cv2.VideoWriter(pipeline, cv2.CAP_GSTREAMER, 0, 60, image_size,  False)
-    if not out_send.isOpened():
-        print('VideoWriter not opened')
-        exit(0)
-    # output  rtsp info
-    print("\n *** Launched RTSP Streaming at rtsp://%s:8554/spot-stream ***\n\n" %broker_address)
+                            rtspclientsink protocols=udp location=rtsp://%s:8554/spot-stream' % broker_address
+                            #whipsink url=http://%s:8889/spot-stream/publish' % broker_address
 
-    try:
-        key = ' '
-        while True:
-            image = zed.get_image()
-            out_send.write(image)
-            key = cv2.waitKey(10)
+            image_size = (1280, 360)
+
+            out_send = cv2.VideoWriter(pipeline, cv2.CAP_GSTREAMER, 0, 60, image_size,  True)
+            if not out_send.isOpened():
+                print('VideoWriter not opened')
+                exit(0)
+            # output  rtsp info
+            print("\n *** Launched RTSP Streaming at rtsp://%s:8554/spot-stream ***\n\n" %broker_address)
+            connected = check_internet_connection()
+            while connected:
+                image = zed.get_image()
+                out_send.write(image)
+                #key = cv2.waitKey(10)
+                connected = check_internet_connection()
+            print("disconnected...")
+            while not connected:
+                reconnect()
+                connected = check_internet_connection()
+
     except KeyboardInterrupt:
         pass
+
     finally:
         zed.shutdown()
+        
+def main(broker_address):
+    connected = check_internet_connection()
 
-def stream_loop_spot(broker_address, spot):
-    pipeline = 'appsrc ! videoconvert ! videoscale ! video/x-raw,format=GRAY8,width=960,height=640,framerate=30/1 ! nvvidconv ! \
-                            nvv4l2h264enc bitrate=600000 ! video/x-h264, \
-                            stream-format=byte-stream ! \
-                            rtspclientsink protocols=tcp location=rtsp://%s:8554/spot-stream' % broker_address
-    image_size = (960, 640)
-    
-    out_send = cv2.VideoWriter(pipeline, cv2.CAP_GSTREAMER, 0, 30, image_size,  False)
-    if not out_send.isOpened():
-        print('VideoWriter not opened')
-        exit(0)
-    # output  rtsp info
-    print("\n *** Launched RTSP Streaming at rtsp://%s:8554/spot-stream ***\n\n" %broker_address)
+    while not connected:
+        reconnect()
+        connected = check_internet_connection()
 
-    try:
-        key = ' '
-        while True:
-            image = spot.interface.get_image()
-            out_send.write(image)
-            key = cv2.waitKey(10)
-    except KeyboardInterrupt:
-        pass
+    stream_thread = threading.Thread(target=stream_loop, args=(broker_address,))
+    stream_thread.start()
+    spot = SpotClient(broker_address)
+    control_thread = threading.Thread(target=spot.control_loop)
+    control_thread.start()
 
-def main(broker_address, image_source):
-    if image_source == 'ZED':
-        stream_thread = threading.Thread(target=stream_loop_zed, args=(broker_address, image_source))
-        stream_thread.start()
-        spot = SpotClient(broker_address, image_source)
-        control_thread = threading.Thread(target=spot.control_loop)
-        control_thread.start()
-    elif image_source == 'SPOT':
-        spot = SpotClient(broker_address, image_source)
-        stream_thread = threading.Thread(target=stream_loop_spot, args=(broker_address, spot))
-        stream_thread.start()
-        control_thread = threading.Thread(target=spot.control_loop)
-        control_thread.start()
-
-    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Send video stream to RTSP server")
@@ -143,16 +226,9 @@ if __name__ == '__main__':
         'ip_address',
         type=str,
         nargs='?',
-        default='34.16.188.15',  
+        default='48.209.18.239',  
         help='The IP address of the RTSP server'
-    )
-    parser.add_argument(
-        'image_source',
-        type=str,
-        nargs='?',
-        default='ZED',  
-        help='The image source for visual feedback from robot'
     )
 
     args = parser.parse_args()
-    main(args.ip_address, args.image_source)
+    main(args.ip_address)
