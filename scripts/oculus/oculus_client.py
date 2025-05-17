@@ -115,7 +115,7 @@ def main(broker_address):
             # Use the KATVR related inputs when active
             if katvr.is_active:
                 inputs_alternative = katvr.create_alternative_inputs(inputs)
-                print("Alternative Inputs:", [f"{x:.2f}" for x in inputs_alternative])
+                print("Alternative Inputs:", [f"{x:.2f}" for x in inputs_alternative], end=' ' * 20 + '\r')
 
                 """
                 The inputs_alternative list is expected to be in the following format:
@@ -136,7 +136,7 @@ def main(broker_address):
             else:
                 # Get the inputs from index #0 to #6
                 inputs_standard = inputs[:7]
-                print("Standard Inputs:", [f"{x:.2f}" for x in inputs_standard])
+                print("Standard Inputs:", [f"{x:.2f}" for x in inputs_standard], end=' ' * 20 + '\r')
 
                 """
                 The inputs_standard list is expected to be in the following format:

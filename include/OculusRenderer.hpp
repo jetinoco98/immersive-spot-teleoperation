@@ -23,10 +23,10 @@
 
 class OculusRenderer {
 public:
-    OculusRenderer(ovrSession session);
+    OculusRenderer();
     ~OculusRenderer();
 
-    bool initialize(int captureWidth, int captureHeight);
+    bool initialize(int captureWidth, int captureHeight, ovrSession session);
     bool update(VideoCaptureFrameBuffer& buffer);
     void shutdown();
 
@@ -68,8 +68,7 @@ private:
     ovrHmdDesc hmdDesc_;
     GLuint rectVBO_[3];
     ovrTextureSwapChain textureChain_;
-    VideoCaptureFrameBuffer* buffer_ = nullptr;
-    Shader shader_;
+    std::unique_ptr<Shader> shader_;
     ovrMirrorTexture mirrorTexture_ = nullptr;
 
     // For Oculus SDK result and error checking

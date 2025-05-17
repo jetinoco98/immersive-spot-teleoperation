@@ -76,9 +76,9 @@ int main(int argc, char* argv[])
     }
 
     // Create the OculusRenderer object
-    OculusRenderer renderer;
+    OculusRenderer renderer(oculus_session);
     // Initialize the Oculus renderer
-    if (!renderer.initialize(stream.getWidth(), stream.getHeight(), oculus_session)) {
+    if (!renderer.initialize(stream.getWidth(), stream.getHeight())) {
         std::cerr << "[Error] Unable to initialize Oculus renderer." << std::endl;
         return -1;
     }
@@ -108,7 +108,7 @@ int main(int argc, char* argv[])
 
         // --- Update the Oculus renderer
         if (!renderer.update(stream.buffer_)) { break; }
-
+        
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
         processOculusInput(data, oculus_session, LastInputState);
 
@@ -124,6 +124,7 @@ int main(int argc, char* argv[])
         publisher.send(data_msg, zmq::send_flags::none);
     }
 
+    
     // CLOSING AND CLEANUP
 
     // Closing ZeroMQ socket
@@ -132,7 +133,7 @@ int main(int argc, char* argv[])
     zmq_context.close();
 
     // Cleanup the renderer and the stream
-    // renderer.shutdown();
+    renderer.shutdown();
     stream.stop();
 
     // Quit
@@ -238,9 +239,8 @@ void processOculusInput(float* data, ovrSession session, ovrInputState& LastInpu
     data[7] = calibration;
     data[8] = alignment;
 
-    // Print on the same line, overwrite previous output, and pad with spaces to clear leftovers
-    /*printf(
-        "\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f %-20s",
+    printf(
+        "Yaw: %6.2f | Pitch: %6.2f | Roll: %6.2f | LS(Y: %5.2f, X: %5.2f) | RS(X: %5.2f) | STAND: %.1f | CALIBRATE: %.1f | ALIGN: %.1f\n",
         orientation.yaw,
         -orientation.pitch,
         -orientation.roll,
@@ -249,9 +249,8 @@ void processOculusInput(float* data, ovrSession session, ovrInputState& LastInpu
         rightStick.x,
         robot_stand,
         calibration,
-        alignment,
-        "" // extra spaces to clear leftovers
-    );*/
+        alignment
+    );
 
     // Update last input state
     LastInputState = InputState;

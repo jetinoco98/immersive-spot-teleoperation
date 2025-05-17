@@ -5,11 +5,7 @@
 //                           Constructor / Destructor
 // ============================================================================
 
-OculusRenderer::OculusRenderer(ovrSession session)
-    : shader_(OVR_ZED_VS, OVR_ZED_FS), isVisible_(true),
-    session_(session)
-{
-}
+OculusRenderer::OculusRenderer(){}
 
 OculusRenderer::~OculusRenderer() 
 {
@@ -20,27 +16,49 @@ OculusRenderer::~OculusRenderer()
 //                                 Public Methods
 // ============================================================================
 
-bool OculusRenderer::initialize(int captureWidth, int captureHeight) 
+bool OculusRenderer::initialize(int captureWidth, int captureHeight, ovrSession session) 
 {
     if (initialized_) return true;
 
-    // Save the variables passed to the function
-    captureWidth_ = captureWidth;
-    captureHeight_ = captureHeight;
-
     try
     {
+        // Save the variables passed to the function
+        captureWidth_ = captureWidth;
+        captureHeight_ = captureHeight;
+        session_ = session;
+
         initializeSDL();
+        printf("SDL initialized successfully.\n");
+
         initializeGL();
+        printf("OpenGL initialized successfully.\n");
 
         initializeCaptureTextures();
+        printf("Capture textures initialized successfully.\n");
+
         setEyeTextureSizes();
+        printf("Eye texture sizes set successfully.\n");
+
         createTextureSwapChain();
+        printf("Texture swap chain created successfully.\n");
+
         initializeFrameBuffer();
+        printf("Frame buffer initialized successfully.\n");
+
         initializeMirrorTexture();
+        printf("Mirror texture initialized successfully.\n");
+
         initializeTracking();
+        printf("Tracking initialized successfully.\n");
+
         initializeRectangleBuffers();
+        printf("Rectangle buffers initialized successfully.\n");
+
+        printf("Creating shader...\n");
+        shader_ = std::make_unique<Shader>(OVR_ZED_VS, OVR_ZED_FS);
+
         setupShaderAttributes();
+        printf("Shader attributes set up successfully.\n");
     }
     catch(const std::exception& e)
     {
@@ -391,7 +409,7 @@ void OculusRenderer::initializeRectangleBuffers()
 void OculusRenderer::setupShaderAttributes() 
 {
     // Enable the shader
-    glUseProgram(shader_.getProgramId());
+    glUseProgram(shader_->getProgramId());
     
     // Bind the Vertex Buffer Objects of the rectangle that displays video capture images
     // vertices
@@ -456,7 +474,7 @@ void OculusRenderer::grabFrame(VideoCaptureFrameBuffer& buffer)
             // Bind the left or right video capture image
             glBindTexture(GL_TEXTURE_2D, eye == ovrEye_Left ? captureTextureID_[ovrEye_Left] : captureTextureID_[ovrEye_Right]);
             // Bind the isLeft value
-            glUniform1ui(glGetUniformLocation(shader_.getProgramId(), "isLeft"), eye == ovrEye_Left ? 1U : 0U);
+            glUniform1ui(glGetUniformLocation(shader_->getProgramId(), "isLeft"), eye == ovrEye_Left ? 1U : 0U);
             // Draw the video capture image
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
         }
