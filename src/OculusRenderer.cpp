@@ -5,7 +5,10 @@
 //                           Constructor / Destructor
 // ============================================================================
 
-OculusRenderer::OculusRenderer(){}
+OculusRenderer::OculusRenderer(ovrSession& session)
+    : session_(session)  // initialize reference member
+{
+}
 
 OculusRenderer::~OculusRenderer() 
 {
@@ -16,7 +19,7 @@ OculusRenderer::~OculusRenderer()
 //                                 Public Methods
 // ============================================================================
 
-bool OculusRenderer::initialize(int captureWidth, int captureHeight, ovrSession session) 
+bool OculusRenderer::initialize(int captureWidth, int captureHeight) 
 {
     if (initialized_) return true;
 
@@ -25,7 +28,6 @@ bool OculusRenderer::initialize(int captureWidth, int captureHeight, ovrSession 
         // Save the variables passed to the function
         captureWidth_ = captureWidth;
         captureHeight_ = captureHeight;
-        session_ = session;
 
         initializeSDL();
         printf("SDL initialized successfully.\n");
@@ -275,7 +277,8 @@ void OculusRenderer::createTextureSwapChain()
     descTextureSwap.SampleCount = 1;
     descTextureSwap.StaticImage = ovrFalse;
     // Create the OpenGL texture swap chain
-    result = ovr_CreateTextureSwapChainGL(session_, &descTextureSwap, &textureChain_);
+    ovrErrorInfo errInf;
+    ovrResult result = ovr_CreateTextureSwapChainGL(session_, &descTextureSwap, &textureChain_);
 
     if (OVR_SUCCESS(result)) {
         int length = 0;
@@ -323,8 +326,8 @@ void OculusRenderer::initializeMirrorTexture()
     descMirrorTexture.Height = winHeight_;
     descMirrorTexture.Format = OVR_FORMAT_R8G8B8A8_UNORM_SRGB;
 
-    
-    result = ovr_CreateMirrorTextureGL(session_, &descMirrorTexture, &mirrorTexture_);
+    ovrErrorInfo errInf;
+    ovrResult result = ovr_CreateMirrorTextureGL(session_, &descMirrorTexture, &mirrorTexture_);
 
     if (!OVR_SUCCESS(result)) {
         ovr_GetLastErrorInfo(&errInf);
@@ -431,6 +434,7 @@ void OculusRenderer::setupShaderAttributes()
 
 void OculusRenderer::grabFrame(VideoCaptureFrameBuffer& buffer) 
 {
+
     // Get texture swap index where we must draw our frame
     GLuint curTexId;
     int curIndex;
@@ -495,6 +499,9 @@ void OculusRenderer::grabFrame(VideoCaptureFrameBuffer& buffer)
 
 void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer) 
 {
+    // if (!isVisible_) {
+    //     return;
+    // }
     /*
     Note: Even if we don't ask to refresh the framebuffer or if the Camera::grab()
             doesn't catch a new frame, we have to submit an image to the Rift; it
@@ -522,7 +529,8 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
     ovrLayerHeader* layers = &ld.Header;
     // Submit the frame to the Oculus compositor
     // which will display the frame in the Oculus headset
-    result = ovr_SubmitFrame(session_, frameIndex_, nullptr, &layers, 1);
+    ovrErrorInfo errInf;
+    ovrResult result = ovr_SubmitFrame(session_, frameIndex_, nullptr, &layers, 1);
 
     if (!OVR_SUCCESS(result)) {
         ovr_GetLastErrorInfo(&errInf);
@@ -552,6 +560,7 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
         0, 0, w, h,
         GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    // Swap the SDL2 window
-    SDL_GL_SwapWindow(window_);
+    // TO DO: Swap the SDL2 window
+    // Currently the following line crashes the application
+    // SDL_GL_SwapWindow(window_);
 }

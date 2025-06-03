@@ -23,14 +23,12 @@
 
 class OculusRenderer {
 public:
-    OculusRenderer();
+    OculusRenderer(ovrSession& session);
     ~OculusRenderer();
 
-    bool initialize(int captureWidth, int captureHeight, ovrSession session);
+    bool initialize(int captureWidth, int captureHeight);
     bool update(VideoCaptureFrameBuffer& buffer);
     void shutdown();
-
-    ovrSession session_; // The current Oculus session
 
 private:
     // Initialization Part 1
@@ -54,30 +52,32 @@ private:
     // Internal functions
     static void BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture);
 
-    // Internal variables
-    bool initialized_;  // Represents the initialization of the whole class
+    // ====== Internal variables ======
+    
+    // Objects of local libraries
+    std::unique_ptr<Shader> shader_;
+
+    // Objects from external libraries (Oculus, SDL, OpenGL, OpenCV)
+    ovrSession& session_;  // reference member, no copy
     SDL_Window* window_;
     SDL_GLContext glContext_;
     SDL_Event events_;   // SDL variable that will be used to store input events
+    ovrHmdDesc hmdDesc_;
+    ovrTextureSwapChain textureChain_;
+    ovrMirrorTexture mirrorTexture_ = nullptr;
     GLuint captureTextureID_[2];
     GLuint fboID_, depthBuffID_, mirrorFBOID_;
     ovrSizei textureSize0_, textureSize1_;
     ovrSizei bufferSize_;
     ovrPosef eyeRenderPose_[2];
     ovrPosef hmdToEyeOffset_[2];
-    ovrHmdDesc hmdDesc_;
     GLuint rectVBO_[3];
-    ovrTextureSwapChain textureChain_;
-    std::unique_ptr<Shader> shader_;
-    ovrMirrorTexture mirrorTexture_ = nullptr;
 
-    // For Oculus SDK result and error checking
-    ovrResult result;
-    ovrErrorInfo errInf;
-
+    // Regular variables and normal types
+    bool initialized_;  // Represents the initialization of the whole class
     int winWidth_, winHeight_;
     int captureWidth_, captureHeight_;
     long long frameIndex_;
     double sensorSampleTime_;
-    bool isVisible_;
+    bool isVisible_ = true;  // start as visible by default
 };

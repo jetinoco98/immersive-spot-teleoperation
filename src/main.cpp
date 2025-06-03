@@ -35,7 +35,7 @@ struct AppConfig {
 // Function declarations
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args = "");
 RPY quaternionToRPY(const ovrTrackingState& ts);
-void processOculusInput(float *data, ovrSession session, ovrInputState &LastInputState);
+void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInputState);
 AppConfig LoadAppConfig(const std::string& filename = "config.json");
 
 
@@ -76,9 +76,9 @@ int main(int argc, char* argv[])
     }
 
     // Create the OculusRenderer object
-    OculusRenderer renderer;
+    OculusRenderer renderer(oculus_session);
     // Initialize the Oculus renderer
-    if (!renderer.initialize(stream.getWidth(), stream.getHeight(), oculus_session)) {
+    if (!renderer.initialize(stream.getWidth(), stream.getHeight())) {
         std::cerr << "[Error] Unable to initialize Oculus renderer." << std::endl;
         return -1;
     }
@@ -95,7 +95,6 @@ int main(int argc, char* argv[])
     publisher.connect("tcp://localhost:5555");
 
     // Create variable for HDM State 
-    ovrInputState InputState;
     ovrInputState LastInputState = {};
     float data[9];  
 
@@ -107,7 +106,9 @@ int main(int argc, char* argv[])
     while (true) {
 
         // --- Update the Oculus renderer
-        if (!renderer.update(stream.buffer_)) { break; }
+        if (!renderer.update(stream.buffer_)) {
+            break;
+        }
 
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
         processOculusInput(data, oculus_session, LastInputState);
@@ -132,7 +133,7 @@ int main(int argc, char* argv[])
     zmq_context.close();
 
     // Cleanup the renderer and the stream
-    // renderer.shutdown();
+    renderer.shutdown();
     stream.stop();
 
     // Quit
@@ -187,7 +188,7 @@ RPY quaternionToRPY(const ovrTrackingState& ts) {
 }
 
 
-void processOculusInput(float* data, ovrSession session, ovrInputState& LastInputState) {
+void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInputState) {
     ovrInputState InputState;
     ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
 
