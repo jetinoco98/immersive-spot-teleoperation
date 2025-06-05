@@ -1,43 +1,4 @@
-#define NOMINMAX
-#include <Windows.h>
-
-// Standard Libraries
-#include <stdio.h>
-#include <iostream>
-#include <string.h>
-#include <cmath>
-#include <stddef.h>
-#include <fstream>
-#include <stdexcept>
-
-// ZeroMQ: for inter-process communication
-#include <zmq.hpp>
-
-// JSON: for configuration file parsing
-#include "json.hpp"
-using json = nlohmann::json;
-
-// Local include files
-#include "StreamCapture.hpp"
-#include "OculusRenderer.hpp"
-
-
-struct RPY {
-    float roll, pitch, yaw;
-};
-
-struct AppConfig {
-    bool use_katvr;
-    std::string ip_address;
-    std::string stream_address;
-};
-
-// Function declarations
-void runPythonScript(const std::string& relativeScriptPath, const std::string& args = "");
-RPY quaternionToRPY(const ovrTrackingState& ts);
-void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInputState);
-AppConfig LoadAppConfig(const std::string& filename = "config.json");
-
+#include "main.hpp"
 
 // ============================================================================
 //                                 MAIN FUNCTION
@@ -77,7 +38,7 @@ int main(int argc, char* argv[])
 
     // Create the OculusRenderer object
     OculusRenderer renderer(oculus_session);
-    // Initialize the Oculus renderer
+    // // Initialize the Oculus renderer
     if (!renderer.initialize(stream.getWidth(), stream.getHeight())) {
         std::cerr << "[Error] Unable to initialize Oculus renderer." << std::endl;
         return -1;
@@ -94,10 +55,11 @@ int main(int argc, char* argv[])
     zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
     publisher.connect("tcp://localhost:5555");
 
-    // Create variable for HDM State 
+    // Create variables for HDM State 
     ovrInputState LastInputState = {};
-    float data[9];  
+    float data[9];
 
+    printf("Starting main loop...\n");
 
     // ============================================================================
     //                                 MAIN LOOP
@@ -106,9 +68,7 @@ int main(int argc, char* argv[])
     while (true) {
 
         // --- Update the Oculus renderer
-        if (!renderer.update(stream.buffer_)) {
-            break;
-        }
+        if (!renderer.update(stream.buffer_)) {break;}
 
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
         processOculusInput(data, oculus_session, LastInputState);
@@ -125,8 +85,7 @@ int main(int argc, char* argv[])
         publisher.send(data_msg, zmq::send_flags::none);
     }
 
-    // CLOSING AND CLEANUP
-
+    // --- CLOSING AND CLEANUP
     // Closing ZeroMQ socket
     publisher.close();
     zmq_context.shutdown();
@@ -141,9 +100,9 @@ int main(int argc, char* argv[])
 }
 
 
-// ===================================================
-// ----- FUNCTION DEFINITIONS -----
-// ===================================================
+// ================================================================
+//                        FUNCTION DEFINITIONS
+// ================================================================
 
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args) {
     char currentDir[MAX_PATH];
@@ -240,8 +199,8 @@ void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInp
     data[8] = alignment;
 
     // Print on the same line, overwrite previous output, and pad with spaces to clear leftovers
-    /*printf(
-        "\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f %-20s",
+    printf(
+        "\x1b[2K\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f",
         orientation.yaw,
         -orientation.pitch,
         -orientation.roll,
@@ -250,9 +209,9 @@ void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInp
         rightStick.x,
         robot_stand,
         calibration,
-        alignment,
-        "" // extra spaces to clear leftovers
-    );*/
+        alignment
+    );
+    fflush(stdout);
 
     // Update last input state
     LastInputState = InputState;
@@ -268,15 +227,20 @@ AppConfig LoadAppConfig(const std::string& filename) {
     json config;
     config_file >> config;
 
-    std::string ip_address = config.value("ip", "");
-    std::string stream_address = config.value("stream", "");
     bool use_katvr = config.value("use_katvr", false);
+    int ip_stream_value = config.value("ip_stream_value", 1);
+
+    std::string ip_key = "ip_" + std::to_string(ip_stream_value);
+    std::string stream_key = "stream_" + std::to_string(ip_stream_value);
+
+    std::string ip_address = config.value(ip_key, "");
+    std::string stream_address = config.value(stream_key, "");
 
     if (ip_address.empty()) {
-        throw std::runtime_error("[ConfigLoader] Missing 'ip' in config.");
+        throw std::runtime_error("[ConfigLoader] Missing '" + ip_key + "' in config.");
     }
     if (stream_address.empty()) {
-        throw std::runtime_error("[ConfigLoader] Missing 'stream' in config.");
+        throw std::runtime_error("[ConfigLoader] Missing '" + stream_key + "' in config.");
     }
 
     return { use_katvr, ip_address, stream_address };

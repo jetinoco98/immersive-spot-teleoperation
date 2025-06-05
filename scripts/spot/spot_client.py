@@ -30,6 +30,7 @@ class SpotClient:
     def __init__(self, broker_address):
         self.broker_address = broker_address
         self.sub_topic_spot = "spot/inputs"
+        self.sub_topic_spot2 = "spot/inputs2"  # For KATVR
         self.sub_topic_arm = "arm/inputs"
         self.sub_topic_rtt = "spot/command"
         self.pub_topic_rtt = "spot/response"
@@ -46,8 +47,8 @@ class SpotClient:
     def on_connect(self, client, userdata, flags, rc):
         print("Connected with result code " + str(rc))
         client.subscribe(self.sub_topic_spot)
+        client.subscribe(self.sub_topic_spot2)  # For KATVR
         client.subscribe(self.sub_topic_rtt)
-        #client.subscribe(self.sub_topic_arm)
 
     
     def process_stand_command(self, command):
@@ -78,6 +79,10 @@ class SpotClient:
             # Decode the message payload
             payload = msg.payload.decode()
             inputs = json.loads(payload)
+
+            if not inputs:
+                print("Received empty inputs from spot/inputs.")
+                return
 
             """
             The inputs list from spot/inputs is expected to be in the following format:
@@ -110,9 +115,13 @@ class SpotClient:
                 self.interface.set_touch_controls(touch_controls)
 
         # -- Message received when KATVR is being used --
-        elif msg.topic == "spot/inputs2":
+        elif msg.topic == self.sub_topic_spot2:
             payload = msg.payload.decode()
             inputs = json.loads(payload)
+
+            if not inputs:
+                print("Received empty inputs from spot/inputs2.")
+                return
 
             """
             The inputs list from spot/inputs2 is expected to be in the following format:
@@ -149,10 +158,6 @@ class SpotClient:
         elif msg.topic == self.sub_topic_rtt:
             command = msg.payload.decode()
             client.publish(self.pub_topic_rtt, payload=command)
-
-        #elif msg.topic == self.sub_topic_arm:
-        #    payload = msg.payload.decode()
-        #    inputs = json.loads(payload)
 
 
     def control_loop(self):
@@ -205,6 +210,7 @@ def stream_loop(broker_address):
 
     finally:
         zed.shutdown()
+        
         
 def main(broker_address):
     connected = check_internet_connection()

@@ -206,7 +206,7 @@ void OculusRenderer::initializeSDL()
     winWidth_ = 1280;
     winHeight_ = 720;
     Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
-    SDL_Window* window_ = SDL_CreateWindow("Stereo Passthrough", x, y, winWidth_, winHeight_, flags);
+    window_ = SDL_CreateWindow("Stereo Passthrough", x, y, winWidth_, winHeight_, flags);
 
     if (!window_) {
         throw std::runtime_error("Failed to create SDL window");
@@ -336,12 +336,11 @@ void OculusRenderer::initializeMirrorTexture()
     GLuint mirrorTextureId;
     ovr_GetMirrorTextureBufferGL(session_, mirrorTexture_, &mirrorTextureId);
 
-    GLuint mirrorFBOID;
-    glGenFramebuffers(1, &mirrorFBOID);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, mirrorFBOID);
+    glGenFramebuffers(1, &mirrorFBOID_);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, mirrorFBOID_);
     glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, mirrorTextureId, 0);
     glFramebufferRenderbuffer(GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);\
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 }
 
 
@@ -499,9 +498,6 @@ void OculusRenderer::grabFrame(VideoCaptureFrameBuffer& buffer)
 
 void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer) 
 {
-    // if (!isVisible_) {
-    //     return;
-    // }
     /*
     Note: Even if we don't ask to refresh the framebuffer or if the Camera::grab()
             doesn't catch a new frame, we have to submit an image to the Rift; it
@@ -560,7 +556,6 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
         0, 0, w, h,
         GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    // TO DO: Swap the SDL2 window
-    // Currently the following line crashes the application
-    // SDL_GL_SwapWindow(window_);
+    // Swap the SDL2 window
+    SDL_GL_SwapWindow(window_);
 }

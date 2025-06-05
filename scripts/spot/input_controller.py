@@ -49,7 +49,7 @@ class Controller:
         simulator.setup()
         return simulator
     
-    def compute_control(value, base_speed):
+    def compute_control(self, value, base_speed):
         if abs(value) > INPUT_TRESHOLD:
             return base_speed if value > 0 else -base_speed
         return 0

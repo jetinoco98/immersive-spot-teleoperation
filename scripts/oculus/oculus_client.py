@@ -2,10 +2,10 @@
 
 import argparse
 import paho.mqtt.client as mqtt
-import json
 import time
 
 # -- KATVR: New imports --
+import sys
 import zmq
 import json
 import struct
@@ -66,7 +66,7 @@ def hdm_data_processor(message):
     try:
         inputs = list(struct.unpack('9f', message))
         # Check for calibration on the index #7 of the inputs list
-        if inputs[7] == 1:
+        if inputs[7] == 1 and katvr.is_active:
             print("Received calibration request from HDM")
             katvr.requires_hdm_calibration = True
     except:
@@ -95,8 +95,8 @@ def receive_from_zmq():
 def monitor_katvr_activity():
     global katvr, last_katvr_message_time
     while True:
-        # Check if more than 1 second has passed since the last KATVR message
-        if time.time() - last_katvr_message_time > 1:
+        # Check if more than 20 seconds have passed since the last KATVR message
+        if time.time() - last_katvr_message_time > 20:
             katvr.is_active = False
         time.sleep(0.1)  # Check every 100ms
 
@@ -112,10 +112,17 @@ def main(broker_address):
 
     try:
         while True:
+            # Wait for inputs to be received
+            if not inputs:
+                time.sleep(0.1)
+                continue
+
             # Use the KATVR related inputs when active
             if katvr.is_active:
                 inputs_alternative = katvr.create_alternative_inputs(inputs)
-                print("Alternative Inputs:", [f"{x:.2f}" for x in inputs_alternative], end=' ' * 20 + '\r')
+                sys.stdout.write('\r\033[K')
+                sys.stdout.write("Alternative Inputs: " + str([f"{x:.2f}" for x in inputs_alternative]))
+                sys.stdout.flush()
 
                 """
                 The inputs_alternative list is expected to be in the following format:
@@ -136,7 +143,9 @@ def main(broker_address):
             else:
                 # Get the inputs from index #0 to #6
                 inputs_standard = inputs[:7]
-                print("Standard Inputs:", [f"{x:.2f}" for x in inputs_standard], end=' ' * 20 + '\r')
+                sys.stdout.write('\r\033[K')  # Clear the current line
+                sys.stdout.write("Standard Inputs: " + str([f"{x:.2f}" for x in inputs_standard]))
+                sys.stdout.flush()
 
                 """
                 The inputs_standard list is expected to be in the following format:

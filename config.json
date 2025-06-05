@@ -1,15 +1,10 @@
 {
-    "ip": "48.209.18.239",
-    "stream": "rtsp://48.209.18.239:8554/spot-stream",
-    "_comment_katvr": "Write true or false",
+    "ip_stream_value": 2,
     "use_katvr": false,
 
+    "ip_1": "48.209.18.239",
+    "stream_1": "rtsp://48.209.18.239:8554/spot-stream",
 
-    "_comment": "The following are placeholders for possible IP and stream addresses",
-
-    "_comment_ip_main": "48.209.18.239",
-    "_comment_stream_main": "rtsp://48.209.18.239:8554/spot-stream",
-
-    "_comment_ip_2": "34.154.167.133",
-    "_comment_stream_2": "rtsp://34.154.167.133:8554/spot-stream"
+    "ip_2": "100.119.186.122",
+    "stream_2": "rtsp://100.119.186.122:8554/spot-stream"
 }

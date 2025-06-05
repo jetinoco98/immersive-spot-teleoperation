@@ -91,8 +91,8 @@ class SpotInterface:
         self._robot.power_on()
         self._powered_on=True
         time.sleep(5)
-        blocking_stand(self._robot_command_client)
-        time.sleep(5)
+        # blocking_stand(self._robot_command_client)
+        # time.sleep(5)
         LOGGER.info("ready to take commands")
 
     def _toggle_estop(self):
@@ -254,6 +254,15 @@ class SpotInterface:
         euler = geometry.to_euler_zxy(quat)
         return euler.yaw
     
+    def get_absolute_position(self):
+        """Returns the (x, y) position of the robot in the odometry frame."""
+        robot_state = self._robot_state_client.get_robot_state()
+        frame_tree_snapshot = robot_state.kinematic_state.transforms_snapshot
+        odom_T_body = get_a_tform_b(frame_tree_snapshot, ODOM_FRAME_NAME, BODY_FRAME_NAME)
+
+        pos = odom_T_body.position
+        return pos.x, pos.y
+    
 
     def set_absolute_yaw(self, target_yaw_deg, min_error_threshold=0.05):
         """
@@ -284,13 +293,15 @@ class SpotInterface:
 
         print(f"[YAW CMD] Robot: {math.degrees(current_yaw):.2f}°, Target: {math.degrees(target_robot_yaw):.2f}°, Δ: {math.degrees(yaw_error):.2f}°")
 
-        mobility_params = self._set_mobility_params() 
+        mobility_params = self._set_mobility_params()
+
+        current_x, current_y = self.get_absolute_position()
         
         cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
-            goal_x=0.0,
-            goal_y=0.0,
-            goal_heading=target_robot_yaw,
-            frame_name="odom",
+            goal_x=current_x,
+            goal_y=current_y,
+            goal_heading=yaw_error,
+            frame_name="body",
             params=mobility_params
         )
 
