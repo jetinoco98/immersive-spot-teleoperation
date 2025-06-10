@@ -22,6 +22,7 @@ class ZEDInterface :
         self.runtime = sl.RuntimeParameters()
         self.image_size_out = self.zed.get_camera_information().camera_configuration.resolution
         self.image_size_out.height = self.image_size_out.height/2
+        #self.image_size_out.width = self.image_size_out.width/2
         self.image_zed_out = sl.Mat(self.image_size_out.width, self.image_size_out.height, sl.MAT_TYPE.U8_C4)
 
     def get_image(self):
@@ -29,19 +30,14 @@ class ZEDInterface :
         if err == sl.ERROR_CODE.SUCCESS:
             self.zed.retrieve_image(self.image_zed_out, sl.VIEW.SIDE_BY_SIDE, sl.MEM.CPU, self.image_size_out)
             image_ocv_out = self.image_zed_out.get_data()
-            image = cv2.cvtColor(image_ocv_out, cv2.COLOR_RGBA2GRAY)
-            x, y, w, h = 0, 120, 1280, 240  # Modify these values as needed
-            cropped_roi = image[y:y+h, x:x+w]
-            return cropped_roi
-
+            image = cv2.cvtColor(image_ocv_out, cv2.COLOR_RGBA2RGB)
+            return image
         else:
-            print("error grabing image from zed")
-            return 0
+            print("error grabbing image from ZED")
+            return None, None
 
 
     def shutdown(self):
         self.zed.close()
         print("\nShutting down ZEDInterface.")
 
-
-zed = ZEDInterface()

@@ -57,9 +57,20 @@ class SpotInterface:
         self._powered_on = False
         self._estop_keepalive = None
 
+        # For KATVR integration
         self._calibrated_with_katvr = False
         self._alignment_in_progress = False
         self._katvr_yaw_offset = 0.0
+
+        # PID controller state for KATVR yaw control
+        self._prev_yaw_error = 0.0
+        self._prev_time = time.time()
+
+        # PID controller parameters for KATVR yaw control
+        self._pid_kp = 1.2
+        self._pid_kd = 0.2
+        self._pid_dead_zone_deg = 2.0
+        self._pid_max_v_rot = 1.0
         
         sdk = create_standard_sdk("spot_interface")
         self._robot = sdk.create_robot(ROBOT_IP)
@@ -77,6 +88,7 @@ class SpotInterface:
         self._robot_state_client = self._robot.ensure_client(RobotStateClient.default_service_name)
         self._robot_command_client = self._robot.ensure_client(RobotCommandClient.default_service_name)
         self._start()
+       
 
     def _start(self):
         """
@@ -91,9 +103,7 @@ class SpotInterface:
         self._robot.power_on()
         self._powered_on=True
         time.sleep(5)
-        # blocking_stand(self._robot_command_client)
-        # time.sleep(5)
-        LOGGER.info("ready to take commands")
+        LOGGER.info("Ready to take commands")
 
     def _toggle_estop(self):
         """
@@ -108,23 +118,29 @@ class SpotInterface:
                 self._estop_keepalive.shutdown()
                 self._estop_keepalive = None
 
-    def _set_mobility_params(self):
+    def _set_mobility_params(self, max_linear_vel=1.0, max_angular_vel=1.0):
         """
             Sets the required mobility parameters, including the obstacle avoidance, velocity limits, orientation offset between the robot 
             and footprint frames.
 
+            Args:
+                max_linear_vel (float): Maximum linear velocity (m/s). Default is 1.0.
+                max_angular_vel (float): Maximum angular velocity (rad/s). Default is 1.0.
+
             Returns:
                 mobility_params(spot_command_pb2.MobilityParams)
         """
-        obstacles = spot_command_pb2.ObstacleParams(disable_vision_body_obstacle_avoidance=False,
-                                                    disable_vision_foot_obstacle_avoidance=False,
-                                                    disable_vision_foot_constraint_avoidance=False,
-                                                    disable_vision_foot_obstacle_body_assist= False,
-                                                    disable_vision_negative_obstacles=False,
-                                                    obstacle_avoidance_padding=0.1)
+        obstacles = spot_command_pb2.ObstacleParams(
+            disable_vision_body_obstacle_avoidance=False,
+            disable_vision_foot_obstacle_avoidance=False,
+            disable_vision_foot_constraint_avoidance=False,
+            disable_vision_foot_obstacle_body_assist=False,
+            disable_vision_negative_obstacles=False,
+            obstacle_avoidance_padding=0.1
+        )
         
         # Set the yaw to 0 if the robot is moving in any direction
-        if self._v_x != 0 or self._v_y != 0 or self._v_rot != 0:
+        if self._v_x != 0 or self._v_y != 0:
             self._yaw = 0
         
         # Set the orientation of the robot body frame with respect to the footprint frame
@@ -135,8 +151,8 @@ class SpotInterface:
         pose = geometry_pb2.SE3Pose(position=position, rotation=rotation)
         point = trajectory_pb2.SE3TrajectoryPoint(pose=pose)
         traj = trajectory_pb2.SE3Trajectory(points=[point])
-        body_control=spot_command_pb2.BodyControlParams(base_offset_rt_footprint=traj)
-        speed_limit = SE2VelocityLimit(max_vel=SE2Velocity(linear=Vec2(x=1.0, y=1.0), angular=1.0))
+        body_control = spot_command_pb2.BodyControlParams(base_offset_rt_footprint=traj)
+        speed_limit = SE2VelocityLimit(max_vel=SE2Velocity(linear=Vec2(x=max_linear_vel, y=max_linear_vel), angular=max_angular_vel))
         mobility_params = spot_command_pb2.MobilityParams(obstacle_params=obstacles, vel_limit=speed_limit, body_control=body_control, locomotion_hint=spot_command_pb2.HINT_AUTO)
         return mobility_params
         
@@ -237,77 +253,28 @@ class SpotInterface:
             self._lease_keepalive.shutdown()
 
     
-    def get_absolute_yaw(self):
-        """Returns the yaw (in radians) of the robot in the odometry frame."""
+    def get_absolute_pose(self):
+        """
+        Returns the (x, y, yaw) pose of the robot in the odometry frame.
+
+        Returns:
+            tuple: (x, y, yaw) where x and y are positions in meters, yaw is in radians.
+        """
         robot_state = self._robot_state_client.get_robot_state()
         frame_tree_snapshot = robot_state.kinematic_state.transforms_snapshot
         odom_T_body = get_a_tform_b(frame_tree_snapshot, ODOM_FRAME_NAME, BODY_FRAME_NAME)
 
-        # Convert to SDK Quaternion object
+        pos = odom_T_body.position
         quat = geometry.Quaternion(
             w=odom_T_body.rot.w,
             x=odom_T_body.rot.x,
             y=odom_T_body.rot.y,
             z=odom_T_body.rot.z
         )
-
         euler = geometry.to_euler_zxy(quat)
-        return euler.yaw
-    
-    def get_absolute_position(self):
-        """Returns the (x, y) position of the robot in the odometry frame."""
-        robot_state = self._robot_state_client.get_robot_state()
-        frame_tree_snapshot = robot_state.kinematic_state.transforms_snapshot
-        odom_T_body = get_a_tform_b(frame_tree_snapshot, ODOM_FRAME_NAME, BODY_FRAME_NAME)
-
-        pos = odom_T_body.position
-        return pos.x, pos.y
+        return pos.x, pos.y, euler.yaw
     
 
-    def set_absolute_yaw(self, target_yaw_deg, min_error_threshold=0.05):
-        """
-        Rotate Spot to match a world-relative yaw, calibrated on first call.
-
-        Args:
-            target_yaw_deg (float): Target yaw in degrees from VR platform.
-            min_error_threshold (float): Minimum angle (in radians) under which we skip rotation.
-        """
-        target_yaw_rad = math.radians(target_yaw_deg)
-
-        if not self._calibrated_with_katvr:
-            current_yaw_rad = self.get_absolute_yaw()
-            self._katvr_yaw_offset = target_yaw_rad - current_yaw_rad
-            self._calibrated_with_katvr = True
-            print(f"[CALIBRATION] Platform yaw {target_yaw_deg:.2f}° -> Calibrated offset set.")
-            return
-
-        current_yaw = self.get_absolute_yaw()
-        target_robot_yaw = target_yaw_rad - self._katvr_yaw_offset
-
-        # Normalize to [-π, π]
-        yaw_error = (target_robot_yaw - current_yaw + np.pi) % (2 * np.pi) - np.pi
-
-        if abs(yaw_error) < min_error_threshold:
-            print("[YAW CMD] Within threshold, no rotation needed.")
-            return
-
-        print(f"[YAW CMD] Robot: {math.degrees(current_yaw):.2f}°, Target: {math.degrees(target_robot_yaw):.2f}°, Δ: {math.degrees(yaw_error):.2f}°")
-
-        mobility_params = self._set_mobility_params()
-
-        current_x, current_y = self.get_absolute_position()
-        
-        cmd = RobotCommandBuilder.synchro_se2_trajectory_point_command(
-            goal_x=current_x,
-            goal_y=current_y,
-            goal_heading=yaw_error,
-            frame_name="body",
-            params=mobility_params
-        )
-
-        self._robot_command_client.robot_command(cmd, end_time_secs=time.time() + VELOCITY_CMD_DURATION)
-
-    
     def set_hmd_controls(self, hmd_controls):
         """
         Updates the robot's orientation values (body frame) based on the HMD controls.
@@ -342,25 +309,92 @@ class SpotInterface:
         # Call the velocity command helper function
         self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
 
+
+    def set_pid_controller(self, kp, kd, dead_zone_degrees, max_v_rot_rad_s):
+        """
+        Update the PID controller parameters for KATVR yaw control.
+        """
+        self._pid_kp = kp
+        self._pid_kd = kd
+        self._pid_dead_zone_deg = dead_zone_degrees
+        self._pid_max_v_rot = max_v_rot_rad_s
+        print(f"[PID] Controller updated: Kp={kp}, Kd={kd}, DeadZone={dead_zone_degrees}°, MaxVRot={max_v_rot_rad_s} rad/s")
     
-    def set_katvr_inputs(self, inputs):
+    
+    def set_katvr_command(self, katvr_inputs, touch_controls):
         """
         Sets the KATVR inputs to the robot.
         """
-        self._v_x = inputs[1]
-        self._alignment_in_progress = bool(inputs[2])
+        katvr_yaw = katvr_inputs[0]  # KATVR yaw angle (degrees)
+        # self._v_x = katvr_inputs[1]  # KATVR forward velocity (m/s)
+        self._alignment_in_progress = bool(katvr_inputs[2])
 
-        # -- When the user is walking --
-        if abs(self._v_x) > 0:
-            self._velocity_cmd_helper(v_x=self._v_x, v_y=0.0, v_rot=0.0)
-            self._calibrated_with_katvr = False # Reset calibration flag
-            return
-    
-        # -- When the user is not walking (turning or looking around) --
+        target_yaw_rad = math.radians(katvr_yaw)
+
+        if touch_controls:
+            # If touch controls are provided, use them for velocity commands
+            self._v_x = touch_controls[0]
+            self._v_y = touch_controls[1]
+
         # Robot does not move during alignment
         if self._alignment_in_progress:
+            self._v_x = 0.0
+            self._v_y = 0.0
+            self._v_rot = 0.0
+            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
             self._calibrated_with_katvr = False # Reset calibration flag
             return
+        
+        # Get current SPOT yaw from its odom frame
+        current_x, current_y, current_yaw_rad = self.get_absolute_pose()
 
-        # Set the robot's yaw to match the KATVR yaw
-        self.set_absolute_yaw(inputs[0])
+        # First-time calibration: align robot yaw with VR platform yaw
+        if not self._calibrated_with_katvr:
+            self._katvr_yaw_offset = target_yaw_rad - current_yaw_rad
+            self._calibrated_with_katvr = True
+            print(f"[CALIBRATION] Platform yaw {katvr_yaw:.2f}° -> Calibrated offset set.")
+            # Reset previous yaw error and time
+            self._prev_yaw_error = 0.0
+            self._prev_time = time.time()
+            return
+        
+        # Compute calibrated yaw target for the robot
+        target_robot_yaw = target_yaw_rad - self._katvr_yaw_offset
+        # Normalize yaw error to [-π, π]
+        yaw_error = (target_robot_yaw - current_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+
+        # Use PID parameters from the interface
+        Kp = self._pid_kp
+        Kd = self._pid_kd
+        DEAD_ZONE_RAD = math.radians(self._pid_dead_zone_deg)
+        MAX_V_ROT = self._pid_max_v_rot
+
+        # Time step for derivative
+        now = time.time()
+        dt = now - self._prev_time
+        self._prev_time = now
+
+        # Derivative term
+        prev_error = self._prev_yaw_error
+        d_error = (yaw_error - prev_error) / dt if dt > 0 else 0.0
+        self._prev_yaw_error = yaw_error
+
+        # Dead zone logic
+        if abs(yaw_error) < DEAD_ZONE_RAD:
+            self._v_rot = 0.0
+        else:
+            self._v_rot = Kp * yaw_error + Kd * d_error
+
+        # Clamp v_rot to robot's max angular velocity
+        self._v_rot = max(-MAX_V_ROT, min(MAX_V_ROT, self._v_rot))
+
+        self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
+
+        print(f"[DEBUG] Current SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation.")
+        print(f"[DEBUG] Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s \n")
+
+
+    
+
+
+

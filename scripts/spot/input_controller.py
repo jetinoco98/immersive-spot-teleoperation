@@ -27,8 +27,8 @@ class Controller:
 
     def get_lqr(self, model, silence_solver = False):
         lqr = do_mpc.controller.LQR(model)
-        lqr.settings.t_step = 0.05
-        lqr.settings.n_horizon = None # infinite horizon
+        lqr.set_param(t_step = 0.05)
+        lqr.set_param(n_horizon = None) # infinite horizon
         Q = 10*np.identity(2)
         R = np.identity(2)
         Rdelu = np.identity(2)
@@ -64,7 +64,7 @@ class Controller:
     
     def get_hmd_controls(self, hmd_inputs, measures):
         self.compute_setpoints(hmd_inputs)
-        self.lqr.set_setpoint(xss=self.setpoints)
+        self.lqr.set_setpoint(xss=self.setpoints,uss=np.array([[0],[0]]))
         x = np.array([[measures[0]],[measures[1]]])
         u = self.lqr.make_step(x)
         # Create the control list

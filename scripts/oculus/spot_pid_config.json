@@ -1,0 +1,6 @@
+{
+    "Kp": 1.2,
+    "Kd": 0.2,
+    "DEAD_ZONE_DEGREES": 2.0,
+    "MAX_V_ROT_RAD_S": 1.0
+}

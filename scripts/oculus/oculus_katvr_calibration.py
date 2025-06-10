@@ -46,12 +46,14 @@ class KATVRCalibration:
 
         inputs_alternative = [
             self.get_hdm_relative_angle(),  # Relative HDM Yaw (radians)
-            inputs[1],  # HDM Pitch (radians)
-            inputs[2],  # HDM Roll (radians)
-            self.yaw,  # KATVR Yaw (degrees)
-            self.forward_velocity,  # KATVR Forward Velocity (m/s)
-            inputs[6],  # Command: Stand/Sit
-            inputs[8]   # Command: Alignment
+            inputs[1],                      # HDM Pitch (radians)
+            inputs[2],                      # HDM Roll (radians)
+            self.yaw,                       # KATVR Yaw (degrees)
+            self.forward_velocity,          # KATVR Forward Velocity (m/s)
+            inputs[7],                      # Command: Stand/Sit
+            inputs[9],                      # Command: Alignment
+            inputs[5],                      # Right Controller X (0-1)
+            inputs[6],                      # Right Controller Y (0-1)
         ]
 
         return inputs_alternative

@@ -3,13 +3,11 @@
 import argparse
 import paho.mqtt.client as mqtt
 import time
-
-# -- KATVR: New imports --
-import sys
-import zmq
+import threading
 import json
 import struct
-import threading
+import sys
+import zmq
 from oculus_katvr_calibration import KATVRCalibration
 
 
@@ -41,9 +39,10 @@ The inputs list received from the Meta Quest is expected to be in the following 
 3. Left Controller Y (0-1)
 4. Left Controller X (0-1)
 5. Right Controller X (0-1)
-6. Command: Stand/Sit, from buttons A or B
-7. Command: Calibration, from right index finger trigger -> Exclusive for KATVR logic
-8. Command: Alignment, from right middle finger trigger -> Exclusive for KATVR logic
+6. Right Controller Y (0-1)
+7. Command: Stand/Sit, from buttons A or B
+8. Command: Calibration, from right index finger trigger -> Exclusive for KATVR logic
+9. Command: Alignment, from right middle finger trigger -> Exclusive for KATVR logic
 '''
 
 
@@ -64,9 +63,9 @@ def katvr_data_processor(message):
 def hdm_data_processor(message):
     global inputs, katvr
     try:
-        inputs = list(struct.unpack('9f', message))
-        # Check for calibration on the index #7 of the inputs list
-        if inputs[7] == 1 and katvr.is_active:
+        inputs = list(struct.unpack('10f', message))
+        # Check for calibration on the index #8 of the inputs list
+        if inputs[8] == 1 and katvr.is_active:
             print("Received calibration request from HDM")
             katvr.requires_hdm_calibration = True
     except:
@@ -101,6 +100,34 @@ def monitor_katvr_activity():
         time.sleep(0.1)  # Check every 100ms
 
 
+def send_pid_config_periodically(broker_address):
+    config_path = "spot_pid_config.json"
+    topic = "spot/config"
+    client = mqtt.Client()
+    client.connect(broker_address, 1883)
+    client.loop_start()
+    try:
+        while True:
+            try:
+                with open(config_path, "r") as f:
+                    config = json.load(f)
+                config_out = {
+                    "kp": config.get("Kp", 1.2),
+                    "kd": config.get("Kd", 0.2),
+                    "dead_zone_degrees": config.get("DEAD_ZONE_DEGREES", 2.0),
+                    "max_v_rot_rad_s": config.get("MAX_V_ROT_RAD_S", 1.0)
+                }
+                client.publish(topic, json.dumps(config_out))
+            except Exception as e:
+                print(f"Error sending PID config: {e}")
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+
 # -- MAIN FUNCTION --
 def main(broker_address):
     oculus = OculusClient(broker_address)
@@ -119,7 +146,9 @@ def main(broker_address):
 
             # Use the KATVR related inputs when active
             if katvr.is_active:
+                # Now include right controller X and Y in alternative inputs
                 inputs_alternative = katvr.create_alternative_inputs(inputs)
+
                 sys.stdout.write('\r\033[K')
                 sys.stdout.write("Alternative Inputs: " + str([f"{x:.2f}" for x in inputs_alternative]))
                 sys.stdout.flush()
@@ -133,6 +162,8 @@ def main(broker_address):
                 4. KATVR Forward Velocity (m/s)
                 5. Command: Stand/Sit
                 6. Command: Alignment
+                7. Right Controller X (0-1)
+                8. Right Controller Y (0-1)
                 """
                     
                 # Publish the inputs through MQTT
@@ -184,4 +215,8 @@ if __name__ == '__main__':
         help='The IP address of the MQTT server'
     )
     args = parser.parse_args()
+
+    # TEMPORARY: Start periodic PID config sender in a thread
+    threading.Thread(target=send_pid_config_periodically, args=(args.ip_address,), daemon=True).start()
+
     main(args.ip_address)

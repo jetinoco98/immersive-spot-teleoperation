@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
 
     // Create variables for HDM State 
     ovrInputState LastInputState = {};
-    float data[9];
+    float data[10];
 
     printf("Starting main loop...\n");
 
@@ -158,6 +158,7 @@ void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInp
     if (std::abs(leftStick.x) < radialDeadZone) leftStick.x = 0.0f;
     if (std::abs(leftStick.y) < radialDeadZone) leftStick.y = 0.0f;
     if (std::abs(rightStick.x) < radialDeadZone) rightStick.x = 0.0f;
+    if (std::abs(rightStick.y) < radialDeadZone) rightStick.y = 0.0f;
 
     bool buttonPressed_A = (InputState.Buttons & ovrButton_A);
     bool wasButtonPressed_A = (LastInputState.Buttons & ovrButton_A);
@@ -194,19 +195,21 @@ void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInp
     data[3] = leftStick.y;
     data[4] = leftStick.x;
     data[5] = rightStick.x;
-    data[6] = robot_stand;
-    data[7] = calibration;
-    data[8] = alignment;
+    data[6] = rightStick.y;
+    data[7] = robot_stand;
+    data[8] = calibration;
+    data[9] = alignment;
 
     // Print on the same line, overwrite previous output, and pad with spaces to clear leftovers
     printf(
-        "\x1b[2K\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f",
+        "\x1b[2K\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f,Y:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f",
         orientation.yaw,
         -orientation.pitch,
         -orientation.roll,
         leftStick.y,
         leftStick.x,
         rightStick.x,
+        rightStick.y,
         robot_stand,
         calibration,
         alignment

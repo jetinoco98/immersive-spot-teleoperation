@@ -6,6 +6,13 @@ import zmq
 import json
 
 
+# --- CONSTANTS ---
+FORWARD_VELOCITY_THRESHOLD = 1.5        # The minimum velocity obtained from KATVR to be considered as forward movement
+FORWARD_VELOCITY_CHANGE_LIMIT = 2.5     # The velocity limit above which the forward velocity is considered high
+FORWARD_VELOCITY_NORMAL = 0.25          # NORMAL SPEED
+FORWARD_VELOCITY_HIGH = 0.5             # HIGH SPEED
+
+
 # --- CLASSES ---
 class KATVR:
     def __init__(self):
@@ -29,7 +36,13 @@ class KATVR:
         offset = 90
         self.yaw = (self.yaw - offset + 180) % 360 - 180
 
-    def compute_forward_velocity_normalized(self, threshold=0.7, velocity_change_limit=2.5, normal_velocity=0.5, high_velocity=1.0):
+    def compute_forward_velocity_normalized(
+        self,
+        threshold=FORWARD_VELOCITY_THRESHOLD,
+        velocity_change_limit=FORWARD_VELOCITY_CHANGE_LIMIT,
+        normal_velocity=FORWARD_VELOCITY_NORMAL,
+        high_velocity=FORWARD_VELOCITY_HIGH
+    ):
         """ 
         Normalizes the forward velocity from the KATVR device to a range suitable for the Spot robot.
         Updates the self.forward_velocity_normalized property.

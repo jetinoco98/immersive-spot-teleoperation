@@ -31,9 +31,7 @@ class SpotClient:
         self.broker_address = broker_address
         self.sub_topic_spot = "spot/inputs"
         self.sub_topic_spot2 = "spot/inputs2"  # For KATVR
-        self.sub_topic_arm = "arm/inputs"
-        self.sub_topic_rtt = "spot/command"
-        self.pub_topic_rtt = "spot/response"
+        self.sub_topic_spot_config = "spot/config"
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
@@ -81,7 +79,6 @@ class SpotClient:
             inputs = json.loads(payload)
 
             if not inputs:
-                print("Received empty inputs from spot/inputs.")
                 return
 
             """
@@ -111,11 +108,40 @@ class SpotClient:
             
             # Set the controls for the robot
             if not stand_command_processed and self.robot_stand:
-                self.interface.set_hmd_controls(hmd_controls)
+                # self.interface.set_hmd_controls(hmd_controls)
                 self.interface.set_touch_controls(touch_controls)
 
-        # -- Message received when KATVR is being used --
-        elif msg.topic == self.sub_topic_spot2:
+            return
+
+        # ============================================================
+        #             MESSAGES RECEIVED WHEN KATVR IS IN USE
+        # ============================================================
+
+
+        if msg.topic == self.sub_topic_spot_config:
+            payload = msg.payload.decode()
+            config = json.loads(payload)
+
+            """
+            The config dictionary from spot/config is expected to contain a PID Controller
+            configuration:
+            {
+                "kp": (float),
+                "kd": (float),
+                "dead_zone_degrees": (float),
+                "max_v_rot_rad_s": (float),
+            }
+            """
+            
+            kp = config.get("kp", 1.2) # Default Kp
+            kd = config.get("kd", 0.2) # Default Kd
+            dead_zone_degrees = config.get("dead_zone_degrees", 2.0) # Default Dead Zone (degrees)
+            max_v_rot_rad_s = config.get("max_v_rot_rad_s", 1.0) # Default Max V_Rot (rad/s)
+
+            self.interface.set_pid_controller(kp, kd, dead_zone_degrees, max_v_rot_rad_s)
+
+
+        if msg.topic == self.sub_topic_spot2:
             payload = msg.payload.decode()
             inputs = json.loads(payload)
 
@@ -132,12 +158,21 @@ class SpotClient:
             4. KATVR Forward Velocity (m/s)
             5. Command: Stand/Sit
             6. Command: Alignment
+            7. Right Controller X (0-1)
+            8. Right Controller Y (0-1)
             """
             
             hmd_inputs = inputs[0:3]
             # Update HDM inputs with LQR-optimized controls
             spot_measures = self.interface.get_body_orientation()
             hmd_controls = self.controller.get_hmd_controls(hmd_inputs, spot_measures)
+
+            touch_inputs_alternative = [
+                inputs[7],  # Right Controller X (0-1): Forward/Backward
+                inputs[8],  # Right Controller Y (0-1): Right/Left
+                0.0,        # Control for angular velocity (not used in this case)
+            ]
+            touch_controls = self.controller.get_touch_controls(touch_inputs_alternative)
 
             # Process the stand command
             stand_command = inputs[5]
@@ -151,13 +186,10 @@ class SpotClient:
 
             # Set the controls for the robot
             if not stand_command_processed and self.robot_stand:
-                self.interface.set_hmd_controls(hmd_controls)
-                self.interface.set_katvr_inputs(katvr_inputs)
+                # self.interface.set_hmd_controls(hmd_controls)
+                self.interface.set_katvr_command(katvr_inputs, touch_controls)
 
-
-        elif msg.topic == self.sub_topic_rtt:
-            command = msg.payload.decode()
-            client.publish(self.pub_topic_rtt, payload=command)
+        
 
 
     def control_loop(self):
