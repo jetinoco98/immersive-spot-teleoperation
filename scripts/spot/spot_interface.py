@@ -39,7 +39,10 @@ LOGGER = logging.getLogger()
 VELOCITY_CMD_DURATION = 0.6  # seconds
 MAX_YAW = 0.5
 MAX_PITCH = 0.5
-MAX_ROLL = 0.5 
+MAX_ROLL = 0.5
+
+MAX_LINEAR_VEL = 1.0  # m/s
+MAX_ANGULAR_VEL = 1.5  # rad/s
 
 
 class SpotInterface:
@@ -58,6 +61,8 @@ class SpotInterface:
         self._estop_keepalive = None
 
         # For KATVR integration
+        self._odom_yaw = None
+        self._is_odometry_updated = False
         self._calibrated_with_katvr = False
         self._alignment_in_progress = False
         self._katvr_yaw_offset = 0.0
@@ -105,6 +110,7 @@ class SpotInterface:
         time.sleep(5)
         LOGGER.info("Ready to take commands")
 
+
     def _toggle_estop(self):
         """
             Toggle estop on/off. Initial state is ON.
@@ -118,14 +124,11 @@ class SpotInterface:
                 self._estop_keepalive.shutdown()
                 self._estop_keepalive = None
 
-    def _set_mobility_params(self, max_linear_vel=1.0, max_angular_vel=1.0):
+
+    def _set_mobility_params(self):
         """
             Sets the required mobility parameters, including the obstacle avoidance, velocity limits, orientation offset between the robot 
             and footprint frames.
-
-            Args:
-                max_linear_vel (float): Maximum linear velocity (m/s). Default is 1.0.
-                max_angular_vel (float): Maximum angular velocity (rad/s). Default is 1.0.
 
             Returns:
                 mobility_params(spot_command_pb2.MobilityParams)
@@ -139,7 +142,7 @@ class SpotInterface:
             obstacle_avoidance_padding=0.1
         )
         
-        # Set the yaw to 0 if the robot is moving in any direction
+        # Set Spot's body frame yaw to 0 if the robot is moving in any direction
         if self._v_x != 0 or self._v_y != 0:
             self._yaw = 0
         
@@ -152,10 +155,11 @@ class SpotInterface:
         point = trajectory_pb2.SE3TrajectoryPoint(pose=pose)
         traj = trajectory_pb2.SE3Trajectory(points=[point])
         body_control = spot_command_pb2.BodyControlParams(base_offset_rt_footprint=traj)
-        speed_limit = SE2VelocityLimit(max_vel=SE2Velocity(linear=Vec2(x=max_linear_vel, y=max_linear_vel), angular=max_angular_vel))
+        speed_limit = SE2VelocityLimit(max_vel=SE2Velocity(linear=Vec2(x=MAX_LINEAR_VEL, y=MAX_LINEAR_VEL), angular=MAX_ANGULAR_VEL))
         mobility_params = spot_command_pb2.MobilityParams(obstacle_params=obstacles, vel_limit=speed_limit, body_control=body_control, locomotion_hint=spot_command_pb2.HINT_AUTO)
         return mobility_params
         
+
     def _orientation_cmd_helper(self, yaw=0.0, roll=0.0, pitch=0.0, height=0.0):
         """
             A helper function to set the robot attitude and height values.
@@ -170,6 +174,7 @@ class SpotInterface:
         cmd = RobotCommandBuilder.synchro_stand_command(body_height=height, footprint_R_body=orientation)
         self._robot_command_client.robot_command(lease=None, command=cmd, end_time_secs=time.time() + VELOCITY_CMD_DURATION)
 
+
     def _velocity_cmd_helper(self, v_x=0.0, v_y=0.0, v_rot=0.0):
         """
             A helper function to set the velocity values generated from the locomotion.
@@ -183,6 +188,7 @@ class SpotInterface:
         cmd = RobotCommandBuilder.synchro_velocity_command(v_x=v_x, v_y=v_y, v_rot=v_rot, params=mobility_params)
         self._robot_command_client.robot_command(lease=None, command=cmd, end_time_secs=time.time() + VELOCITY_CMD_DURATION)
             
+
     def get_body_vel(self):
         """
             Provides the angular velocity values of the robot base frame.
@@ -195,6 +201,7 @@ class SpotInterface:
         measures = [vis_vel_ang.z, vis_vel_ang.y, vis_vel_ang.x]
         return measures
     
+
     def get_body_orientation(self):
         """
             Provides the orientation values of the robot base frame.
@@ -209,28 +216,9 @@ class SpotInterface:
     def stand(self):
         blocking_stand(self._robot_command_client)
 
+
     def sit(self):
         blocking_sit(self._robot_command_client)
-
-    def is_robot_standing(state_client):
-        """Returns True if the robot is currently standing, otherwise False."""
-        state = state_client.get_robot_state()
-        mobility_state = state.mobility_state
-
-        return (
-            hasattr(mobility_state, "has_stand_state") and mobility_state.has_stand_state and
-            mobility_state.stand_state == StandCommand.Feedback.STATUS_IS_STANDING
-        )
-
-    def is_robot_sitting(state_client):
-        """Returns True if the robot is currently sitting, otherwise False."""
-        state = state_client.get_robot_state()
-        mobility_state = state.mobility_state
-
-        return (
-            hasattr(mobility_state, "has_sit_state") and mobility_state.has_sit_state and
-            mobility_state.sit_state == SitCommand.Feedback.STATUS_IS_SITTING
-        )
 
 
     def shutdown(self):
@@ -251,28 +239,6 @@ class SpotInterface:
             self._estop_keepalive.shutdown()
         if self._lease_keepalive:
             self._lease_keepalive.shutdown()
-
-    
-    def get_absolute_pose(self):
-        """
-        Returns the (x, y, yaw) pose of the robot in the odometry frame.
-
-        Returns:
-            tuple: (x, y, yaw) where x and y are positions in meters, yaw is in radians.
-        """
-        robot_state = self._robot_state_client.get_robot_state()
-        frame_tree_snapshot = robot_state.kinematic_state.transforms_snapshot
-        odom_T_body = get_a_tform_b(frame_tree_snapshot, ODOM_FRAME_NAME, BODY_FRAME_NAME)
-
-        pos = odom_T_body.position
-        quat = geometry.Quaternion(
-            w=odom_T_body.rot.w,
-            x=odom_T_body.rot.x,
-            y=odom_T_body.rot.y,
-            z=odom_T_body.rot.z
-        )
-        euler = geometry.to_euler_zxy(quat)
-        return pos.x, pos.y, euler.yaw
     
 
     def set_hmd_controls(self, hmd_controls):
@@ -300,14 +266,37 @@ class SpotInterface:
     def set_touch_controls(self, controls):
         """
             Sets the computed control signals on the robot base frame, using ``_velocity_cmd_helper()`` function.
+            Only updates a value if the corresponding control is not None.
         """
-        # Update the robot's velocity values
-        self._v_x = controls[0]
-        self._v_y = controls[1]
-        self._v_rot = controls[2]
+        # Update the robot's velocity values only if not None
+        if controls[0] is not None:
+            self._v_x = controls[0]
+        if controls[1] is not None:
+            self._v_y = controls[1]
+        if controls[2] is not None:
+            self._v_rot = controls[2]
+        
 
-        # Call the velocity command helper function
+    def send_velocity_command(self):
         self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
+
+
+    def update_odometry_angles(self):
+        """
+        Updates the class variable _odom_yaw with the robot's yaw in the odometry frame.
+        """
+        robot_state = self._robot_state_client.get_robot_state()
+        frame_tree_snapshot = robot_state.kinematic_state.transforms_snapshot
+        odom_T_body = get_a_tform_b(frame_tree_snapshot, ODOM_FRAME_NAME, BODY_FRAME_NAME)
+
+        quat = geometry.Quaternion(
+            w=odom_T_body.rot.w,
+            x=odom_T_body.rot.x,
+            y=odom_T_body.rot.y,
+            z=odom_T_body.rot.z
+        )
+        euler = geometry.to_euler_zxy(quat)
+        self._odom_yaw = euler.yaw  # Update the class variable
 
 
     def set_pid_controller(self, kp, kd, dead_zone_degrees, max_v_rot_rad_s):
@@ -318,10 +307,9 @@ class SpotInterface:
         self._pid_kd = kd
         self._pid_dead_zone_deg = dead_zone_degrees
         self._pid_max_v_rot = max_v_rot_rad_s
-        print(f"[PID] Controller updated: Kp={kp}, Kd={kd}, DeadZone={dead_zone_degrees}°, MaxVRot={max_v_rot_rad_s} rad/s")
     
     
-    def set_katvr_command(self, katvr_inputs, touch_controls):
+    def set_katvr_command(self, katvr_inputs):
         """
         Sets the KATVR inputs to the robot.
         """
@@ -329,12 +317,8 @@ class SpotInterface:
         # self._v_x = katvr_inputs[1]  # KATVR forward velocity (m/s)
         self._alignment_in_progress = bool(katvr_inputs[2])
 
+        # == Process KATVR inputs ==
         target_yaw_rad = math.radians(katvr_yaw)
-
-        if touch_controls:
-            # If touch controls are provided, use them for velocity commands
-            self._v_x = touch_controls[0]
-            self._v_y = touch_controls[1]
 
         # Robot does not move during alignment
         if self._alignment_in_progress:
@@ -345,14 +329,15 @@ class SpotInterface:
             self._calibrated_with_katvr = False # Reset calibration flag
             return
         
-        # Get current SPOT yaw from its odom frame
-        current_x, current_y, current_yaw_rad = self.get_absolute_pose()
+        # Return early if odometry is not updated
+        if self._is_odometry_updated is False:
+            return
 
-        # First-time calibration: align robot yaw with VR platform yaw
+        # Calibration: Align robot yaw with VR platform yaw
         if not self._calibrated_with_katvr:
-            self._katvr_yaw_offset = target_yaw_rad - current_yaw_rad
+            self._katvr_yaw_offset = target_yaw_rad - self._odom_yaw
             self._calibrated_with_katvr = True
-            print(f"[CALIBRATION] Platform yaw {katvr_yaw:.2f}° -> Calibrated offset set.")
+            # print(f"[CALIBRATION] Platform yaw {katvr_yaw:.2f}° -> Calibrated offset set.")
             # Reset previous yaw error and time
             self._prev_yaw_error = 0.0
             self._prev_time = time.time()
@@ -361,7 +346,7 @@ class SpotInterface:
         # Compute calibrated yaw target for the robot
         target_robot_yaw = target_yaw_rad - self._katvr_yaw_offset
         # Normalize yaw error to [-π, π]
-        yaw_error = (target_robot_yaw - current_yaw_rad + np.pi) % (2 * np.pi) - np.pi
+        yaw_error = (target_robot_yaw - self._odom_yaw + np.pi) % (2 * np.pi) - np.pi
 
         # Use PID parameters from the interface
         Kp = self._pid_kp
@@ -385,13 +370,15 @@ class SpotInterface:
         else:
             self._v_rot = Kp * yaw_error + Kd * d_error
 
-        # Clamp v_rot to robot's max angular velocity
+        # Clamp Rotational Velocity to robot's max angular velocity
         self._v_rot = max(-MAX_V_ROT, min(MAX_V_ROT, self._v_rot))
 
         self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
 
-        print(f"[DEBUG] Current SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation.")
-        print(f"[DEBUG] Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s \n")
+        self._is_odometry_updated = False  # Reset odometry update flag
+
+        # print(f"[DEBUG] Current SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation.")
+        # print(f"[DEBUG] Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s \n")
 
 
     

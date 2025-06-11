@@ -8,6 +8,7 @@ import json
 import struct
 import sys
 import zmq
+import os
 from oculus_katvr_calibration import KATVRCalibration
 
 
@@ -101,7 +102,8 @@ def monitor_katvr_activity():
 
 
 def send_pid_config_periodically(broker_address):
-    config_path = "spot_pid_config.json"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, "spot_pid_config.json")
     topic = "spot/config"
     client = mqtt.Client()
     client.connect(broker_address, 1883)
@@ -172,8 +174,8 @@ def main(broker_address):
                 oculus.client.publish(new_topic, payload)
             
             else:
-                # Get the inputs from index #0 to #6
-                inputs_standard = inputs[:7]
+                # Get the inputs from index #0 to #5 and #7 for stand command
+                inputs_standard = inputs[:6] + [inputs[7]]
                 sys.stdout.write('\r\033[K')  # Clear the current line
                 sys.stdout.write("Standard Inputs: " + str([f"{x:.2f}" for x in inputs_standard]))
                 sys.stdout.flush()
@@ -211,7 +213,7 @@ if __name__ == '__main__':
         'ip_address',
         type=str,
         nargs='?',
-        default='34.16.188.15',  
+        default='100.119.186.122',  
         help='The IP address of the MQTT server'
     )
     args = parser.parse_args()

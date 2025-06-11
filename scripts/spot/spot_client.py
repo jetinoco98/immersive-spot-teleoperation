@@ -46,7 +46,7 @@ class SpotClient:
         print("Connected with result code " + str(rc))
         client.subscribe(self.sub_topic_spot)
         client.subscribe(self.sub_topic_spot2)  # For KATVR
-        client.subscribe(self.sub_topic_rtt)
+        client.subscribe(self.sub_topic_spot_config)
 
     
     def process_stand_command(self, command):
@@ -72,6 +72,10 @@ class SpotClient:
 
 
     def on_message(self, client, userdata, msg):
+
+        # ============================================================
+        #            MESSAGES RECEIVED ON STANDARD CONTROLS
+        # ============================================================
 
         if msg.topic == self.sub_topic_spot:
             # Decode the message payload
@@ -110,13 +114,13 @@ class SpotClient:
             if not stand_command_processed and self.robot_stand:
                 # self.interface.set_hmd_controls(hmd_controls)
                 self.interface.set_touch_controls(touch_controls)
+                self.interface.send_velocity_command()
 
             return
 
         # ============================================================
-        #             MESSAGES RECEIVED WHEN KATVR IS IN USE
+        #           MESSAGES RECEIVED WITH KATVR CONTROLS
         # ============================================================
-
 
         if msg.topic == self.sub_topic_spot_config:
             payload = msg.payload.decode()
@@ -168,11 +172,12 @@ class SpotClient:
             hmd_controls = self.controller.get_hmd_controls(hmd_inputs, spot_measures)
 
             touch_inputs_alternative = [
-                inputs[7],  # Right Controller X (0-1): Forward/Backward
-                inputs[8],  # Right Controller Y (0-1): Right/Left
-                0.0,        # Control for angular velocity (not used in this case)
+                inputs[8],  # Right Controller Y (0-1): Forward/Backward
+                inputs[7],  # Right Controller X (0-1): Right/Left
+                0.0,       # Control for angular velocity (not used in this case)
             ]
             touch_controls = self.controller.get_touch_controls(touch_inputs_alternative)
+            touch_controls[2] = None  # No angular control for KATVR
 
             # Process the stand command
             stand_command = inputs[5]
@@ -187,15 +192,18 @@ class SpotClient:
             # Set the controls for the robot
             if not stand_command_processed and self.robot_stand:
                 # self.interface.set_hmd_controls(hmd_controls)
-                self.interface.set_katvr_command(katvr_inputs, touch_controls)
-
-        
-
+                self.interface.set_touch_controls(touch_controls)
+                self.interface.set_katvr_command(katvr_inputs)
+                pass
+    
 
     def control_loop(self):
         try:
             while True:
-                time.sleep(0.05)
+                # Update the robot's odometry angles at a rate of 10Hz
+                self.interface.update_odometry_angles()
+                self.interface._is_odometry_updated = True
+                time.sleep(0.1)
                 
         except KeyboardInterrupt:
             pass
