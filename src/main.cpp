@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
     // Execute python scripts
     runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", ip_address);
     if (config.use_katvr) {
-        runPythonScript("\\..\\..\\scripts\\katvr\\katvr_main.py");
+        runPythonScript("\\..\\..\\scripts\\katvr\\katvr.py");
     }
 
 	// Initialize ZMQ Socket
@@ -56,7 +56,6 @@ int main(int argc, char* argv[])
     publisher.connect("tcp://localhost:5555");
 
     // Create variables for HDM State 
-    ovrInputState LastInputState = {};
     float data[10];
 
     printf("Starting main loop...\n");
@@ -71,7 +70,7 @@ int main(int argc, char* argv[])
         if (!renderer.update(stream.buffer_)) {break;}
 
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
-        processOculusInput(data, oculus_session, LastInputState);
+        getOculusInput(data, oculus_session);
 
         // --- Send HDM data over ZeroMQ socket
         // Send the first part of the message (topic)
@@ -147,77 +146,40 @@ RPY quaternionToRPY(const ovrTrackingState& ts) {
 }
 
 
-void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInputState) {
+void getOculusInput(float* data, ovrSession& session) {
     ovrInputState InputState;
     ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
 
     ovrVector2f rightStick = InputState.Thumbstick[ovrHand_Right];
-    ovrVector2f leftStick = InputState.Thumbstick[ovrHand_Left];
-
-    const float radialDeadZone = 0.5f;
-    if (std::abs(leftStick.x) < radialDeadZone) leftStick.x = 0.0f;
-    if (std::abs(leftStick.y) < radialDeadZone) leftStick.y = 0.0f;
-    if (std::abs(rightStick.x) < radialDeadZone) rightStick.x = 0.0f;
-    if (std::abs(rightStick.y) < radialDeadZone) rightStick.y = 0.0f;
-
-    bool buttonPressed_A = (InputState.Buttons & ovrButton_A);
-    bool wasButtonPressed_A = (LastInputState.Buttons & ovrButton_A);
-    bool justPressedA = (!wasButtonPressed_A && buttonPressed_A);
-
-    bool buttonPressed_B = (InputState.Buttons & ovrButton_B);
-    bool wasButtonPressed_B = (LastInputState.Buttons & ovrButton_B);
-    bool justPressedB = (!wasButtonPressed_B && buttonPressed_B);
-
-    static float robot_stand = 0.0f;
-    if (justPressedA && !robot_stand) robot_stand = 1.0f;
-    if (justPressedB && robot_stand) robot_stand = 0.0f;
-
-    float rightIndexTrigger = InputState.IndexTrigger[ovrHand_Right];
-    float lastRightIndexTrigger = LastInputState.IndexTrigger[ovrHand_Right];
-    float calibration = 0.0f;
-    if (lastRightIndexTrigger < 0.5f && rightIndexTrigger >= 0.5f) {
-        calibration = 1.0f;
-    }
-
-    float rightHandTrigger = InputState.HandTrigger[ovrHand_Right];
-    float alignment = 0.0f;
-    if (rightHandTrigger >= 0.5f) {
-        alignment = 1.0f;
-    }
+    ovrVector2f leftStick  = InputState.Thumbstick[ovrHand_Left];
 
     ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
     RPY orientation = quaternionToRPY(ts);
 
-    // Fill data array
+    // Pack orientation and thumbsticks
     data[0] = orientation.yaw;
     data[1] = -orientation.pitch;
     data[2] = -orientation.roll;
-    data[3] = leftStick.y;
-    data[4] = leftStick.x;
+    data[3] = leftStick.x;
+    data[4] = leftStick.y;
     data[5] = rightStick.x;
     data[6] = rightStick.y;
-    data[7] = robot_stand;
-    data[8] = calibration;
-    data[9] = alignment;
 
-    // Print on the same line, overwrite previous output, and pad with spaces to clear leftovers
-    printf(
-        "\x1b[2K\rYaw:%6.2f | Pitch:%6.2f | Roll:%6.2f | LS(Y:%5.2f,X:%5.2f) | RS(X:%5.2f,Y:%5.2f) | Stand:%.1f | Calib:%.1f | Algn:%.1f",
-        orientation.yaw,
-        -orientation.pitch,
-        -orientation.roll,
-        leftStick.y,
-        leftStick.x,
-        rightStick.x,
-        rightStick.y,
-        robot_stand,
-        calibration,
-        alignment
-    );
-    fflush(stdout);
+    // Buttons: A, B, X, Y
+    data[7] = (InputState.Buttons & ovrButton_A) ? 1.0f : 0.0f;
+    data[8] = (InputState.Buttons & ovrButton_B) ? 1.0f : 0.0f;
+    data[9] = (InputState.Buttons & ovrButton_X) ? 1.0f : 0.0f;
+    data[10] = (InputState.Buttons & ovrButton_Y) ? 1.0f : 0.0f;
 
-    // Update last input state
-    LastInputState = InputState;
+    // Thumbstick clicks
+    data[11] = (InputState.Buttons & ovrButton_LThumb) ? 1.0f : 0.0f;
+    data[12] = (InputState.Buttons & ovrButton_RThumb) ? 1.0f : 0.0f;
+
+    // Triggers
+    data[13] = InputState.IndexTrigger[ovrHand_Left];
+    data[14] = InputState.IndexTrigger[ovrHand_Right];
+    data[15] = InputState.HandTrigger[ovrHand_Left];   // grip
+    data[16] = InputState.HandTrigger[ovrHand_Right];  // grip
 }
 
 

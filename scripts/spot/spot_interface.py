@@ -64,14 +64,15 @@ class SpotInterface:
         self._odom_yaw = None
         self._is_odometry_updated = False
         self._calibrated_with_katvr = False
-        self._alignment_in_progress = False
+        self._speed_lock = False
+        self._rotation_lock = False
         self._katvr_yaw_offset = 0.0
 
         # PID controller state for KATVR yaw control
         self._prev_yaw_error = 0.0
         self._prev_time = time.time()
 
-        # PID controller parameters for KATVR yaw control
+        # PID controller default parameters for KATVR yaw control
         self._pid_kp = 1.2
         self._pid_kd = 0.2
         self._pid_dead_zone_deg = 2.0
@@ -309,35 +310,49 @@ class SpotInterface:
         self._pid_max_v_rot = max_v_rot_rad_s
     
     
-    def set_katvr_command(self, katvr_inputs):
+    def set_katvr_command(self, inputs):
         """
         Sets the KATVR inputs to the robot.
         """
-        katvr_yaw = katvr_inputs[0]  # KATVR yaw angle (degrees)
-        # self._v_x = katvr_inputs[1]  # KATVR forward velocity (m/s)
-        self._alignment_in_progress = bool(katvr_inputs[2])
+        katvr_yaw = inputs['katvr_yaw']  # KATVR yaw angle (degrees)
+        self._v_x = inputs['katvr_velocity']  # KATVR forward velocity (m/s)
+        self._speed_lock = bool(inputs['speed_lock'])  # Speed lock (1.0 if pressed, else 0.0)
+        self._rotation_lock = bool(inputs['rotation_lock'])  # Rotation lock (1.0 if pressed, else 0.0)
 
-        # == Process KATVR inputs ==
-        target_yaw_rad = math.radians(katvr_yaw)
-
-        # Robot does not move during alignment
-        if self._alignment_in_progress:
+        if self._rotation_lock and self._speed_lock:
+            # If both locks are active, stop all movement
             self._v_x = 0.0
             self._v_y = 0.0
             self._v_rot = 0.0
             self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
-            self._calibrated_with_katvr = False # Reset calibration flag
+            self._calibrated_with_katvr = False
+            return
+
+        # Rotation lock
+        if self._rotation_lock:
+            self._v_rot = 0.0
+            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
+            self._calibrated_with_katvr = False 
+            return
+        
+        # Speed lock
+        if self._speed_lock:
+            self._v_x = 0.0
+            self._v_y = 0.0
+            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
             return
         
         # Return early if odometry is not updated
         if self._is_odometry_updated is False:
             return
+        
+        # ========== Process KATVR inputs ===========
+        target_yaw_rad = math.radians(katvr_yaw)
 
         # Calibration: Align robot yaw with VR platform yaw
         if not self._calibrated_with_katvr:
             self._katvr_yaw_offset = target_yaw_rad - self._odom_yaw
             self._calibrated_with_katvr = True
-            # print(f"[CALIBRATION] Platform yaw {katvr_yaw:.2f}° -> Calibrated offset set.")
             # Reset previous yaw error and time
             self._prev_yaw_error = 0.0
             self._prev_time = time.time()
@@ -377,8 +392,8 @@ class SpotInterface:
 
         self._is_odometry_updated = False  # Reset odometry update flag
 
-        # print(f"[DEBUG] Current SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation.")
-        # print(f"[DEBUG] Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s \n")
+        print(f"[DEBUG] SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation | "
+              f"Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s\n")
 
 
     

@@ -37,5 +37,5 @@ struct AppConfig {
 // Function declarations
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args = "");
 RPY quaternionToRPY(const ovrTrackingState& ts);
-void processOculusInput(float* data, ovrSession& session, ovrInputState& LastInputState);
+void getOculusInput(float* data, ovrSession& session);
 AppConfig LoadAppConfig(const std::string& filename = "config.json");
