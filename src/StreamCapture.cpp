@@ -33,18 +33,14 @@ bool StreamCapture::start() {
         return false;
     }
 
+    // Get the width and height of the video stream
+    width = static_cast<int>(cv_capture_.get(cv::CAP_PROP_FRAME_WIDTH));
+    height = static_cast<int>(cv_capture_.get(cv::CAP_PROP_FRAME_HEIGHT));
+
     buffer_.run = true;
     buffer_.new_frame = true;
     capture_thread_ = std::thread(&StreamCapture::captureLoop, this);
     return true;
-}
-
-int StreamCapture::getWidth() {
-    return static_cast<int>(cv_capture_.get(cv::CAP_PROP_FRAME_WIDTH));
-}
-
-int StreamCapture::getHeight() {
-    return static_cast<int>(cv_capture_.get(cv::CAP_PROP_FRAME_HEIGHT));
 }
 
 

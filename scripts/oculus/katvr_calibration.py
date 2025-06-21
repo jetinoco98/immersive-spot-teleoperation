@@ -6,7 +6,7 @@ class KATVRCalibration:
         self.hdm_yaw = None
         self.yaw = None
         # Calibration properties
-        self.requires_hdm_calibration = False
+        self.requires_hdm_calibration = True
         self.offset = 0
 
     # --- PRIVATE METHODS ---

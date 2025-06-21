@@ -35,7 +35,20 @@ struct AppConfig {
 };
 
 // Function declarations
+bool InitOculus(ovrSession& session);
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args = "");
 RPY quaternionToRPY(const ovrTrackingState& ts);
 void getOculusInput(float* data, ovrSession& session);
 AppConfig LoadAppConfig(const std::string& filename = "config.json");
+
+// Class declarations
+class ZMQPublisher {
+public:
+    ZMQPublisher(const std::string& address);
+    void send(const std::string& topic, const void* data, size_t size);
+    ~ZMQPublisher();
+
+private:
+    zmq::context_t context_;
+    zmq::socket_t publisher_;
+};

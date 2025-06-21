@@ -22,8 +22,8 @@ public:
     bool start();
     void stop();
 
-    int getWidth();
-    int getHeight();
+    int width = 0;
+    int height = 0;
 
     VideoCaptureFrameBuffer buffer_;
 

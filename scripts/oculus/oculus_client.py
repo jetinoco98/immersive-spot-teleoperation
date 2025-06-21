@@ -8,6 +8,26 @@ import json
 import os
 from input_processor import InputProcessor
 
+# ========== Rich Library for Console Output =========
+from rich.table import Table
+from rich.live import Live
+from rich.console import Console
+
+def dict_to_table(title, data_dict: dict):
+    table = Table(title=title, expand=False, show_lines=True)
+    table.add_column("Key", style="bold cyan", no_wrap=True)
+    table.add_column("Value", justify="right", style="green")
+
+    for k, v in data_dict.items():
+        table.add_row(k, f"{v:.2f}")
+
+    return table
+
+console = Console()
+live = Live(console=console, refresh_per_second=20)
+live.start()
+# =====================================================
+
 
 class OculusClient:
     def __init__(self, broker_address):
@@ -21,11 +41,9 @@ class OculusClient:
 
 
 def main(broker_address):
-    # Initialize variables
-    # oculus = OculusClient(broker_address)
+    # Initialize variables and threads
+    oculus = OculusClient(broker_address)
     iproc = InputProcessor()
-
-    # Start threads
     threading.Thread(target=iproc.receive_from_zmq, daemon=True).start() # Start the ZMQ receiver thread
 
     try:
@@ -41,13 +59,13 @@ def main(broker_address):
                 continue
             else:
                 if iproc.is_katvr_active() and iproc.alternative_inputs:
-                    print('\r\033[K' + "Alternative Inputs: " + ", ".join(f"{k}: {v:.2f}" for k, v in iproc.alternative_inputs.items()))
+                    live.update(dict_to_table("Alternative Inputs", iproc.alternative_inputs))
                     payload = json.dumps(iproc.alternative_inputs)
-                    # oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
+                    oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
                 elif iproc.standard_inputs:
-                    print('\r\033[K' + "Standard Inputs: " + ", ".join(f"{k}: {v:.2f}" for k, v in iproc.standard_inputs.items()))
+                    live.update(dict_to_table("Standard Inputs", iproc.standard_inputs))
                     payload = json.dumps(iproc.standard_inputs)
-                    # oculus.client.publish(topic="spot/inputs", payload=payload)
+                    oculus.client.publish(topic="spot/inputs", payload=payload)
 
             # Temporary: Send PID config periodically
             now = time.time()
@@ -61,7 +79,7 @@ def main(broker_address):
                     "max_v_rot_rad_s": config.get("MAX_V_ROT_RAD_S", 1.5)
                 }
                 payload = json.dumps(config_out)
-                # oculus.client.publish(topic="spot/config", payload=payload)
+                oculus.client.publish(topic="spot/config", payload=payload)
                 last_sent_time = now
 
             # Frequency of 20Hz
@@ -71,9 +89,10 @@ def main(broker_address):
         pass
 
     finally:
-        # oculus.client.loop_stop()
-        # oculus.client.disconnect()
-        print("Oculus client disconnected.")
+        oculus.client.loop_stop()
+        oculus.client.disconnect()
+        live.stop()
+        print("\nOculus client disconnected.")
 
 
 # ===== MAIN SCRIPT =====

@@ -1,5 +1,8 @@
 #include "main.hpp"
 
+#include <chrono>
+#include <thread>  // To simulate a delay
+
 // ============================================================================
 //                                 MAIN FUNCTION
 // ============================================================================
@@ -8,61 +11,39 @@ int main(int argc, char* argv[])
 {
     // Loads the configuration file (config.json)
     AppConfig config = LoadAppConfig();
-    std::string stream_address = config.stream_address;
-    std::string ip_address = config.ip_address;
 
-    // Initialize Oculus SDK
-    ovrResult result = ovr_Initialize(nullptr);
-    if (OVR_FAILURE(result)) {
-        std::cerr << "Failed to initialize Oculus SDK" << std::endl;
-        return -1;
-    }
-
-    // Create Oculus session
+    // Initialize Oculus SDK and create a session
     ovrSession oculus_session = nullptr;
-    ovrGraphicsLuid luid;
-    result = ovr_Create(&oculus_session, &luid);
-    if (OVR_FAILURE(result)) {
-        std::cerr << "Failed to create Oculus session" << std::endl;
-        ovr_Shutdown();
-        return -1;
-    }
+    if (!InitOculus(oculus_session)) return -1;
 
-    // Create the StreamCapture object
-    StreamCapture stream(stream_address);
-    // Start capture of the video stream
-    if (!stream.start()) {
-        std::cerr << "[Error] Unable to start video stream." << std::endl;
-        return -1;
-    }
+    // Initialize the stream capture process
+    StreamCapture stream(config.stream_address);
+    if (!stream.start()) return -1;
 
-    // Create the OculusRenderer object
+    // Initialize the Oculus renderer
     OculusRenderer renderer(oculus_session);
-    // // Initialize the Oculus renderer
-    if (!renderer.initialize(stream.getWidth(), stream.getHeight())) {
-        std::cerr << "[Error] Unable to initialize Oculus renderer." << std::endl;
-        return -1;
-    }
-
+    if (!renderer.initialize(stream.width, stream.height)) return -1;
+    
     // Execute python scripts
-    runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", ip_address);
+    runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", config.ip_address);
     if (config.use_katvr) {
         runPythonScript("\\..\\..\\scripts\\katvr\\katvr.py");
     }
 
 	// Initialize ZMQ Socket
-    zmq::context_t zmq_context(1);
-    zmq::socket_t publisher(zmq_context, zmq::socket_type::pub);
-    publisher.connect("tcp://localhost:5555");
+    ZMQPublisher zmq("tcp://localhost:5555");
 
-    // Create variables for HDM State 
-    float data[10];
+    // Create data variable for HDM & Touch Controller State
+    float data[17];
 
     printf("Starting main loop...\n");
 
     // ============================================================================
     //                                 MAIN LOOP
     // ============================================================================
+
+    int loop_count = 0;
+    auto last_time = std::chrono::steady_clock::now();
 
     while (true) {
 
@@ -73,28 +54,22 @@ int main(int argc, char* argv[])
         getOculusInput(data, oculus_session);
 
         // --- Send HDM data over ZeroMQ socket
-        // Send the first part of the message (topic)
-        std::string topic = "from_hdm"; 
-        zmq::message_t topic_msg(topic.data(), topic.size());
-        publisher.send(topic_msg, zmq::send_flags::sndmore);
+        zmq.send("from_hdm", data, sizeof(data));
 
-        // Send the second part of the message (HDM data)
-        zmq::message_t data_msg(sizeof(data)); 
-        std::memcpy(data_msg.data(), data, sizeof(data));
-        publisher.send(data_msg, zmq::send_flags::none);
+        // Print how many times the loop runs every second
+        loop_count++;
+
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_time);
+
+        if (elapsed.count() >= 1) {
+            // std::cout << "Loop frequency: " << loop_count << " Hz" << std::endl;
+            loop_count = 0;
+            last_time = now;
+        }
+
     }
 
-    // --- CLOSING AND CLEANUP
-    // Closing ZeroMQ socket
-    publisher.close();
-    zmq_context.shutdown();
-    zmq_context.close();
-
-    // Cleanup the renderer and the stream
-    renderer.shutdown();
-    stream.stop();
-
-    // Quit
     return 0;
 }
 
@@ -102,6 +77,24 @@ int main(int argc, char* argv[])
 // ================================================================
 //                        FUNCTION DEFINITIONS
 // ================================================================
+
+bool InitOculus(ovrSession& session) {
+    ovrResult result = ovr_Initialize(nullptr);
+    if (OVR_FAILURE(result)) {
+        std::cerr << "Failed to initialize Oculus SDK" << std::endl;
+        return false;
+    }
+
+    ovrGraphicsLuid luid;
+    result = ovr_Create(&session, &luid);
+    if (OVR_FAILURE(result)) {
+        std::cerr << "Failed to create Oculus session" << std::endl;
+        ovr_Shutdown();
+        return false;
+    }
+    return true;
+}
+
 
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args) {
     char currentDir[MAX_PATH];
@@ -180,6 +173,25 @@ void getOculusInput(float* data, ovrSession& session) {
     data[14] = InputState.IndexTrigger[ovrHand_Right];
     data[15] = InputState.HandTrigger[ovrHand_Left];   // grip
     data[16] = InputState.HandTrigger[ovrHand_Right];  // grip
+
+    // Line 1: Orientation
+    printf("\x1b[2K\rOrientation: (Yaw=%.2f Pitch=%.2f Roll=%.2f)         \n",
+        data[0], data[1], data[2]);
+
+    // Line 2: Buttons (A, B, X, Y, Left Thumb, Right Thumb)
+    printf("\x1b[2K\rButtons: (X=%.0f Y=%.0f LT=%.0f)   (A=%.0f B=%.0f RT=%.0f)          \n",
+        data[7], data[8], data[9], data[10], data[11], data[12]);
+
+    // Line 3: Joysticks (Left and Right)
+    printf("\x1b[2K\rJoysticks: (LStick X=%.2f Y=%.2f)   (RStick X=%.2f Y=%.2f)          \n",
+        data[3], data[4], data[5], data[6]);
+
+    // Line 4: Triggers and Grips (Left and Right)
+    printf("\x1b[2K\rTriggers&Grips: (LTrigger=%.2f LGrip=%.2f)   (RTrigger=%.2f RGrip=%.2f)          \n",
+        data[13], data[15], data[14], data[16]);
+
+    // Move cursor up 4 lines for next overwrite
+    printf("\x1b[4A");
 }
 
 
@@ -209,4 +221,30 @@ AppConfig LoadAppConfig(const std::string& filename) {
     }
 
     return { use_katvr, ip_address, stream_address };
+}
+
+
+// ================================================================
+//                ZMQPublisher Class Implementation
+// ================================================================
+
+ZMQPublisher::ZMQPublisher(const std::string& address)
+    : context_(1), publisher_(context_, zmq::socket_type::pub)
+{
+    publisher_.connect(address);
+}
+
+void ZMQPublisher::send(const std::string& topic, const void* data, size_t size) {
+    zmq::message_t topic_msg(topic.data(), topic.size());
+    zmq::message_t data_msg(size);
+    std::memcpy(data_msg.data(), data, size);
+
+    publisher_.send(topic_msg, zmq::send_flags::sndmore);
+    publisher_.send(data_msg, zmq::send_flags::none);
+}
+
+ZMQPublisher::~ZMQPublisher() {
+    publisher_.close();
+    context_.shutdown();
+    context_.close();
 }
