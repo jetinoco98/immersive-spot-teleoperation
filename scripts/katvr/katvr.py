@@ -1,4 +1,5 @@
-from pythonosc import dispatcher, osc_server
+import socket
+import struct
 import threading
 import time
 import math
@@ -9,8 +10,8 @@ from data_logger import DataLogger
 
 
 # --- CONSTANTS ---
-FORWARD_VELOCITY_THRESHOLD = 1.5        # The minimum velocity obtained from KATVR to be considered as forward movement
-FORWARD_VELOCITY_CHANGE_LIMIT = 2.5     # The velocity limit above which the forward velocity is considered high
+FORWARD_VELOCITY_THRESHOLD = 1.7        # The minimum velocity obtained from KATVR to be considered as forward movement
+FORWARD_VELOCITY_CHANGE_LIMIT = 3.5    # The velocity limit above which the forward velocity is considered high
 FORWARD_VELOCITY_NORMAL = 0.25          # NORMAL SPEED
 FORWARD_VELOCITY_HIGH = 0.5             # HIGH SPEED
 
@@ -119,26 +120,73 @@ class KATVR:
 
 class KATVRManager:
     """Manages the KATVR device connection and data processing."""
-    def __init__(self, zmq_address="tcp://localhost:5555"):
+    def __init__(self, zmq_address="tcp://localhost:5555", udp_ip="127.0.0.1", udp_port=8002):
         self.katvr = KATVR()
+        self.testing_mode = TESTING_MODE
+        # ZMQ setup
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.PUB)
         self.socket.connect(zmq_address)
-        self.testing_mode = TESTING_MODE
+        # UDP setup
+        self.udp_ip = udp_ip
+        self.udp_port = udp_port
+        self.udp_timeout = 0.5
+        self.buffer_size = 1024
+        
+    # ================ HANDLING INCOMING UDP MESSAGES ================
 
-    def message_handler(self, address, *args):
-        if address != "/katvr":
-            print(f"Received message from unknown address: {address}")
+    def message_handler(self):
+        sock = self._setup_udp_socket()
+        print(f"🔵 Listening for UDP float arrays on {self.udp_ip}:{self.udp_port}...")
+
+        try:
+            while True:
+                if self._receive_and_process(sock):
+                    continue  # keep looping
+        except KeyboardInterrupt:
+            print("\nUDP listener interrupted.")
+        finally:
+            sock.close()
+            print("Socket closed.")
+
+    def _setup_udp_socket(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((self.udp_ip, self.udp_port))
+        sock.settimeout(self.udp_timeout)
+        return sock
+
+    def _receive_and_process(self, sock):
+        try:
+            data, addr = sock.recvfrom(self.buffer_size)
+        except socket.timeout:
+            return True  # Nothing received, loop again
+
+        if len(data) % 4 != 0:
+            print(f"⚠️ Malformed data from {addr} ({len(data)} bytes)")
+            return True
+
+        float_array = struct.unpack(f'{len(data) // 4}f', data)
+        self._process_katvr_data(float_array, addr)
+        return True
+
+    def _process_katvr_data(self, float_array, addr):
+        if len(float_array) < 3:
+            print(f"⚠️ Expected at least 3 floats, got: {float_array}")
             return
+
         if not self.katvr.is_active:
             self.katvr.is_active = True
             print("KATVR connection established.")
 
-        self.katvr.current_delta_time, self.katvr.uncorrected_yaw, self.katvr.forward_velocity = args
+        self.katvr.current_delta_time = float_array[0]
+        self.katvr.uncorrected_yaw = float_array[1]
+        self.katvr.forward_velocity = float_array[2]
         self.katvr.process_internal_values()
 
         if not self.testing_mode:
             self.send_to_oculus_client()
+
+    # ================ SENDING DATA THROUGH ZMQ ================
 
     def send_to_oculus_client(self):
         data = {
@@ -148,6 +196,8 @@ class KATVRManager:
         payload = json.dumps(data).encode("utf-8")
         self.socket.send_string("from_katvr", zmq.SNDMORE)
         self.socket.send(payload)
+
+    # ================ MONITORING LOOP ================
 
     def monitor_loop(self, update_interval=0.05):
         """Continuously monitors and prints KATVR sensor data."""
@@ -166,7 +216,7 @@ class KATVRManager:
             )
             time.sleep(update_interval)
 
-    # ================ TESTING METHODS ================
+    # ================ TESTING FUNCTIONS ================
 
     def run_test(self, test_name, duration_seconds, countdown_seconds=5):
         logger = DataLogger(test_name)
@@ -196,7 +246,7 @@ class KATVRManager:
         print(f"Test '{test_name}' complete. Data saved to: {logger.file_path}\n")
         return logger.file_path
     
-    def run_interactive_tests(self):
+    def start_interactive_tests(self):
         """Runs the interactive test sequence using KATVR data."""
         print("\n=== KATVR SENSOR TEST SEQUENCE ===\n")
 
@@ -210,30 +260,14 @@ class KATVRManager:
 
     
 
-# --- OSC SERVER ---
-def start_osc_server(callback):
-    # Local Python server details
-    IP, PORT = "127.0.0.1", 8002
-    disp = dispatcher.Dispatcher()
-    disp.map("/*", callback)
-    server = osc_server.ThreadingOSCUDPServer((IP, PORT), disp)
-    print(f"Listening for OSC messages on {IP}:{PORT}")
-    server.serve_forever()
-
-
 # ================ MAIN ================
 if __name__ == "__main__":
-    katvr_manager = KATVRManager()
-
-    threading.Thread(
-        target=start_osc_server,
-        args=(katvr_manager.message_handler,),
-        daemon=True
-    ).start()
+    katvr_manager = KATVRManager(zmq_address="tcp://localhost:5555", udp_ip="127.0.0.1", udp_port=8002)
+    threading.Thread(target=katvr_manager.message_handler, daemon=True).start()
 
     try:
         if katvr_manager.testing_mode:
-            katvr_manager.run_interactive_tests()
+            katvr_manager.start_interactive_tests()
         else:
             katvr_manager.monitor_loop()
     except KeyboardInterrupt:
