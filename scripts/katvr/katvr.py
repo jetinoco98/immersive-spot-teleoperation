@@ -5,7 +5,6 @@ import time
 import math
 import zmq
 import json
-import os
 from data_logger import DataLogger
 
 
@@ -20,35 +19,23 @@ TESTING_MODE = False
 # True: Testing mode. Performs an interactive test sequence.
 
 
-# --- CLASSES ---
+# ======================================================================
+#                           KATVR DEVICE CLASS
+# ======================================================================
+
 class KATVR:
     """Represents the KATVR device properties and methods for processing data."""
     def __init__(self):
         # KATVR device properties
         self.previous_yaw = None
-        self.uncorrected_yaw = 0
         self.yaw = 0
         self.current_delta_time = None
         self.forward_velocity = 0
         self.forward_velocity_normalized = 0
         self.angular_velocity = 0
-        self.angular_velocity_clamped = 0  
         # Additional properties
         self.is_active = False
         self.last_message_time = None
-        self.message_frequencies = []
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-        os.makedirs(logs_dir, exist_ok=True)
-        self.frequency_log_path = os.path.join(logs_dir, "katvr_frequency_log.txt")
-
-    # --- INTERNAL METHODS ---
-    def apply_special_yaw_correction(self):
-        """
-        Corrects the yaw value obtained from KATVR by applying an offset of 90°.
-        Updates the self.yaw property.
-        """
-        offset = 90
-        self.yaw = (self.uncorrected_yaw - offset + 180) % 360 - 180
 
     def compute_forward_velocity_normalized(
         self,
@@ -86,37 +73,25 @@ class KATVR:
         # Convert to radians
         self.angular_velocity = math.radians(angular_velocity_deg)
 
-    def clamp_angular_velocity(self, max_angular_velocity=1.5):
-        """
-        Clamps the angular velocity to a specified maximum value.
-        Updates the self.angular_velocity_clamped property.
-        """
-        if abs(self.angular_velocity) > max_angular_velocity:
-            self.angular_velocity_clamped = math.copysign(max_angular_velocity, self.angular_velocity)
-        else:
-            self.angular_velocity_clamped = self.angular_velocity
-
     def process_internal_values(self):
         """
         Processes the values obtained from the KATVR device.
         This method is called in the main loop to update the KATVR properties.
         """
         
-        # Offset the yaw to coincide with the KAT Device Simulator
-        self.apply_special_yaw_correction()
-
         # Compute the angular velocity
         self.compute_angular_velocity()
 
         # Normalize forward velocity
         self.compute_forward_velocity_normalized()
 
-        # Clamp angular velocity
-        self.clamp_angular_velocity()
-
         # Update previous yaw
         self.previous_yaw = self.yaw
 
+
+# ======================================================================
+#                           KATVR MANAGER CLASS
+# ======================================================================
 
 class KATVRManager:
     """Manages the KATVR device connection and data processing."""
@@ -136,7 +111,9 @@ class KATVRManager:
     # ================ HANDLING INCOMING UDP MESSAGES ================
 
     def message_handler(self):
-        sock = self._setup_udp_socket()
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((self.udp_ip, self.udp_port))
+        sock.settimeout(self.udp_timeout)
         print(f"🔵 Listening for UDP float arrays on {self.udp_ip}:{self.udp_port}...")
 
         try:
@@ -147,13 +124,6 @@ class KATVRManager:
             print("\nUDP listener interrupted.")
         finally:
             sock.close()
-            print("Socket closed.")
-
-    def _setup_udp_socket(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.bind((self.udp_ip, self.udp_port))
-        sock.settimeout(self.udp_timeout)
-        return sock
 
     def _receive_and_process(self, sock):
         try:
@@ -179,7 +149,7 @@ class KATVRManager:
             print("KATVR connection established.")
 
         self.katvr.current_delta_time = float_array[0]
-        self.katvr.uncorrected_yaw = float_array[1]
+        self.katvr.yaw = float_array[1]
         self.katvr.forward_velocity = float_array[2]
         self.katvr.process_internal_values()
 
@@ -191,7 +161,8 @@ class KATVRManager:
     def send_to_oculus_client(self):
         data = {
             "yaw": round(self.katvr.yaw, 2),
-            "velocity": round(self.katvr.forward_velocity_normalized, 2)
+            # "velocity": round(self.katvr.forward_velocity_normalized, 2)
+            "velocity": 0.0
         }
         payload = json.dumps(data).encode("utf-8")
         self.socket.send_string("from_katvr", zmq.SNDMORE)
@@ -210,7 +181,7 @@ class KATVRManager:
             print(
                 f"YAW: {k.yaw:.2f}° | "
                 f"Forward Velocity: {k.forward_velocity:.2f} m/s ({k.forward_velocity_normalized:.2f}) | "
-                f"Angular Velocity: {k.angular_velocity:.2f} rad/s ({k.angular_velocity_clamped:.2f})"
+                f"Angular Velocity: {k.angular_velocity:.2f} rad/s"
                 f"                  ",
                 end="\r"
             )

@@ -42,9 +42,6 @@ int main(int argc, char* argv[])
     //                                 MAIN LOOP
     // ============================================================================
 
-    int loop_count = 0;
-    auto last_time = std::chrono::steady_clock::now();
-
     while (true) {
 
         // --- Update the Oculus renderer
@@ -55,18 +52,6 @@ int main(int argc, char* argv[])
 
         // --- Send HDM data over ZeroMQ socket
         zmq.send("from_hdm", data, sizeof(data));
-
-        // Print how many times the loop runs every second
-        loop_count++;
-
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_time);
-
-        if (elapsed.count() >= 1) {
-            // std::cout << "Loop frequency: " << loop_count << " Hz" << std::endl;
-            loop_count = 0;
-            last_time = now;
-        }
 
     }
 
@@ -178,9 +163,9 @@ void getOculusInput(float* data, ovrSession& session) {
     printf("\x1b[2K\rOrientation: (Yaw=%.2f Pitch=%.2f Roll=%.2f)         \n",
         data[0], data[1], data[2]);
 
-    // Line 2: Buttons (A, B, X, Y, Left Thumb, Right Thumb)
+    // Line 2: Buttons (X, Y LT, A, B, RT)
     printf("\x1b[2K\rButtons: (X=%.0f Y=%.0f LT=%.0f)   (A=%.0f B=%.0f RT=%.0f)          \n",
-        data[7], data[8], data[9], data[10], data[11], data[12]);
+        data[9], data[10], data[11], data[7], data[8], data[12]);
 
     // Line 3: Joysticks (Left and Right)
     printf("\x1b[2K\rJoysticks: (LStick X=%.2f Y=%.2f)   (RStick X=%.2f Y=%.2f)          \n",

@@ -34,8 +34,7 @@ class DataLogger:
             "yaw": katvr.yaw,
             "forward_velocity": katvr.forward_velocity,
             "forward_velocity_normalized": katvr.forward_velocity_normalized,
-            "angular_velocity": katvr.angular_velocity,
-            "angular_velocity_clamped": katvr.angular_velocity_clamped,
+            "angular_velocity": katvr.angular_velocity
         })
 
     def close(self):

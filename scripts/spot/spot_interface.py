@@ -60,24 +60,22 @@ class SpotInterface:
         self._powered_on = False
         self._estop_keepalive = None
 
-        # For KATVR integration
+        # === For KATVR integration
         self._odom_yaw = None
-        self._is_odometry_updated = False
         self._calibrated_with_katvr = False
-        self._speed_lock = False
-        self._rotation_lock = False
         self._katvr_yaw_offset = 0.0
-
         # PID controller state for KATVR yaw control
+        self._yaw_error = 0.0
         self._prev_yaw_error = 0.0
         self._prev_time = time.time()
-
         # PID controller default parameters for KATVR yaw control
         self._pid_kp = 1.2
         self._pid_kd = 0.2
         self._pid_dead_zone_deg = 2.0
         self._pid_max_v_rot = 1.0
-        
+        # === End of KATVR integration variables
+
+        # === INITIALIZATION
         sdk = create_standard_sdk("spot_interface")
         self._robot = sdk.create_robot(ROBOT_IP)
         self._robot.authenticate(ROBOT_USERNAME, ROBOT_PASSWORD, timeout=60)
@@ -240,7 +238,7 @@ class SpotInterface:
             self._estop_keepalive.shutdown()
         if self._lease_keepalive:
             self._lease_keepalive.shutdown()
-    
+
 
     def set_hmd_controls(self, hmd_controls):
         """
@@ -278,9 +276,27 @@ class SpotInterface:
             self._v_rot = controls[2]
         
 
-    def send_velocity_command(self):
-        self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
+    def send_velocity_command(self, vx=None, vy=None, vrot=None):
+        """
+        Sends a velocity command to the robot.
 
+        Args:
+            vx (float, optional): Forward/backward speed (m/s). If None, uses the current value.
+            vy (float, optional): Left/right speed (m/s). If None, uses the current value.
+            vrot (float, optional): Rotational speed (rad/s). If None, uses the current value.
+        """
+        # Use provided values if given, otherwise use the stored values
+        vx = self._v_x if vx is None else vx
+        vy = self._v_y if vy is None else vy
+        vrot = self._v_rot if vrot is None else vrot
+
+        # Send the velocity command to the robot
+        self._velocity_cmd_helper(v_x=vx, v_y=vy, v_rot=vrot)
+
+    
+    # ====================================================================================
+    #     KATVR INTEGRATION METHODS
+    # ====================================================================================
 
     def update_odometry_angles(self):
         """
@@ -300,7 +316,7 @@ class SpotInterface:
         self._odom_yaw = euler.yaw  # Update the class variable
 
 
-    def set_pid_controller(self, kp, kd, dead_zone_degrees, max_v_rot_rad_s):
+    def update_pid_controller(self, kp, kd, dead_zone_degrees, max_v_rot_rad_s):
         """
         Update the PID controller parameters for KATVR yaw control.
         """
@@ -308,95 +324,92 @@ class SpotInterface:
         self._pid_kd = kd
         self._pid_dead_zone_deg = dead_zone_degrees
         self._pid_max_v_rot = max_v_rot_rad_s
-    
-    
-    def set_katvr_command(self, inputs):
-        """
-        Sets the KATVR inputs to the robot.
-        """
-        katvr_yaw = inputs['katvr_yaw']  # KATVR yaw angle (degrees)
-        self._v_x = inputs['katvr_velocity']  # KATVR forward velocity (m/s)
-        self._speed_lock = bool(inputs['speed_lock'])  # Speed lock (1.0 if pressed, else 0.0)
-        self._rotation_lock = bool(inputs['rotation_lock'])  # Rotation lock (1.0 if pressed, else 0.0)
 
-        if self._rotation_lock and self._speed_lock:
-            # If both locks are active, stop all movement
-            self._v_x = 0.0
-            self._v_y = 0.0
-            self._v_rot = 0.0
-            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
-            self._calibrated_with_katvr = False
-            return
 
-        # Rotation lock
-        if self._rotation_lock:
-            self._v_rot = 0.0
-            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
-            self._calibrated_with_katvr = False 
-            return
-        
-        # Speed lock
-        if self._speed_lock:
-            self._v_x = 0.0
-            self._v_y = 0.0
-            self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
-            return
-        
-        # Return early if odometry is not updated
-        if self._is_odometry_updated is False:
-            return
-        
-        # ========== Process KATVR inputs ===========
-        target_yaw_rad = math.radians(katvr_yaw)
+    def _compute_angular_velocity(self, katvr_yaw_deg):
+        """Compute rotational velocity using PID control to align yaw with KATVR."""
+        self.update_odometry_angles()
 
-        # Calibration: Align robot yaw with VR platform yaw
+        target_yaw_rad = math.radians(katvr_yaw_deg)
+
         if not self._calibrated_with_katvr:
             self._katvr_yaw_offset = target_yaw_rad - self._odom_yaw
             self._calibrated_with_katvr = True
-            # Reset previous yaw error and time
             self._prev_yaw_error = 0.0
             self._prev_time = time.time()
-            return
-        
-        # Compute calibrated yaw target for the robot
+            return 0.0
+
         target_robot_yaw = target_yaw_rad - self._katvr_yaw_offset
-        # Normalize yaw error to [-π, π]
-        yaw_error = (target_robot_yaw - self._odom_yaw + np.pi) % (2 * np.pi) - np.pi
+        self.yaw_error = (target_robot_yaw - self._odom_yaw + np.pi) % (2 * np.pi) - np.pi
 
-        # Use PID parameters from the interface
-        Kp = self._pid_kp
-        Kd = self._pid_kd
-        DEAD_ZONE_RAD = math.radians(self._pid_dead_zone_deg)
-        MAX_V_ROT = self._pid_max_v_rot
-
-        # Time step for derivative
         now = time.time()
         dt = now - self._prev_time
         self._prev_time = now
 
-        # Derivative term
-        prev_error = self._prev_yaw_error
-        d_error = (yaw_error - prev_error) / dt if dt > 0 else 0.0
-        self._prev_yaw_error = yaw_error
+        d_error = (self.yaw_error - self._prev_yaw_error) / dt if dt > 0 else 0.0
+        self._prev_yaw_error = self.yaw_error
 
-        # Dead zone logic
-        if abs(yaw_error) < DEAD_ZONE_RAD:
+        DEAD_ZONE_RAD = math.radians(self._pid_dead_zone_deg)
+        if abs(self.yaw_error) < DEAD_ZONE_RAD:
+            return 0.0
+
+        # PID calculation
+        v_rot = self._pid_kp * self.yaw_error + self._pid_kd * d_error
+        v_rot = max(-self._pid_max_v_rot, min(self._pid_max_v_rot, v_rot))
+        return v_rot
+    
+    
+    def set_katvr_command(self, inputs):
+        """
+        Sets KATVR-based commands for velocity and rotation to the robot.
+        Applies speed and rotation locks as needed, and handles yaw alignment.
+        """
+
+        # === Parse inputs ===
+        katvr_yaw_deg = inputs['katvr_yaw']
+        self._v_x = inputs['katvr_velocity']
+        speed_lock = bool(inputs['speed_lock'])
+        rotation_lock = bool(inputs['rotation_lock'])
+
+        if speed_lock:
+            self._v_x = 0.0
+            self._v_y = 0.0
+
+        # If the robot is moving, lock rotation and reset calibration
+        if self._v_x > 0.0 or self._v_y > 0.0:
+            rotation_lock = True
+            self._calibrated_with_katvr = False 
+            
+        if rotation_lock:
             self._v_rot = 0.0
         else:
-            self._v_rot = Kp * yaw_error + Kd * d_error
+            # === Rotation control with PID ===
+            self._v_rot = self._compute_angular_velocity(katvr_yaw_deg)
 
-        # Clamp Rotational Velocity to robot's max angular velocity
-        self._v_rot = max(-MAX_V_ROT, min(MAX_V_ROT, self._v_rot))
-
+        # === Send command to robot ===
         self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
 
-        self._is_odometry_updated = False  # Reset odometry update flag
-
-        print(f"[DEBUG] SPOT velocities: {self._v_x:.2f} m/s forward, {self._v_y:.2f} m/s sideways, {self._v_rot:.2f} rad/s rotation | "
-              f"Yaw error: {math.degrees(yaw_error):.2f}° | d_error: {math.degrees(d_error):.2f}°/s | v_rot: {self._v_rot:.2f} rad/s\n")
-
-
     
+    def set_idle_mode(self):
+        """
+        Sets the robot to idle mode by setting all velocities and orientations to zero.
+        """
+        self._v_x = 0.0
+        self._v_y = 0.0
+        self._v_rot = 0.0
+        self._yaw = 0.0
+        self._pitch = 0.0
+        self._roll = 0.0
+        self._orientation_cmd_helper(yaw=self._yaw, pitch=self._pitch, roll=self._roll, height=-0.15)
 
 
+    def print_spot_values(self):
+        """
+        Prints condensed robot velocities and orientation on the same console line.
+        """
+        sys.stdout.write(
+            f"\r[SPOT] Vx: {self._v_x:.2f} m/s | Vy: {self._v_y:.2f} | Rot: {self._v_rot:.2f} rad/s | "
+            f"Y: {math.degrees(self._yaw):.1f}° P: {math.degrees(self._pitch):.1f}° R: {math.degrees(self._roll):.1f}°"
+        )
+        sys.stdout.flush()
 

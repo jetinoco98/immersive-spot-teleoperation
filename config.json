@@ -1,6 +1,6 @@
 {
     "ip_stream_value": 2,
-    "use_katvr": true,
+    "use_katvr": false,
 
     "ip_1": "48.209.18.239",
     "stream_1": "rtsp://48.209.18.239:8554/spot-stream",

@@ -57,30 +57,31 @@ def main(broker_address):
             if not iproc.inputs:
                 time.sleep(0.5)
                 continue
-            else:
-                if iproc.is_katvr_active() and iproc.alternative_inputs:
-                    live.update(dict_to_table("Alternative Inputs", iproc.alternative_inputs))
-                    payload = json.dumps(iproc.alternative_inputs)
-                    oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
-                elif iproc.standard_inputs:
-                    live.update(dict_to_table("Standard Inputs", iproc.standard_inputs))
-                    payload = json.dumps(iproc.standard_inputs)
-                    oculus.client.publish(topic="spot/inputs", payload=payload)
+            
+            if iproc.is_katvr_active() and iproc.alternative_inputs:
+                live.update(dict_to_table("Alternative Inputs", iproc.alternative_inputs))
+                payload = json.dumps(iproc.alternative_inputs)
+                oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
+            elif iproc.standard_inputs:
+                live.update(dict_to_table("Standard Inputs", iproc.standard_inputs))
+                payload = json.dumps(iproc.standard_inputs)
+                oculus.client.publish(topic="spot/inputs", payload=payload)
 
             # Temporary: Send PID config periodically
-            now = time.time()
-            if now - last_sent_time > 1:  # Send data every second
-                with open(config_path, "r") as f:
-                    config = json.load(f)
-                config_out = {
-                    "kp": config.get("Kp", 1.2),
-                    "kd": config.get("Kd", 0.05),
-                    "dead_zone_degrees": config.get("DEAD_ZONE_DEGREES", 2.0),
-                    "max_v_rot_rad_s": config.get("MAX_V_ROT_RAD_S", 1.5)
-                }
-                payload = json.dumps(config_out)
-                oculus.client.publish(topic="spot/config", payload=payload)
-                last_sent_time = now
+            if iproc.is_katvr_active():
+                now = time.time()
+                if now - last_sent_time > 1:  # Send data every second
+                    with open(config_path, "r") as f:
+                        config = json.load(f)
+                    config_out = {
+                        "kp": config.get("Kp", 1.2),
+                        "kd": config.get("Kd", 0.05),
+                        "dead_zone_degrees": config.get("DEAD_ZONE_DEGREES", 2.0),
+                        "max_v_rot_rad_s": config.get("MAX_V_ROT_RAD_S", 1.5)
+                    }
+                    payload = json.dumps(config_out)
+                    oculus.client.publish(topic="spot/config", payload=payload)
+                    last_sent_time = now
 
             # Frequency of 20Hz
             time.sleep(0.05)  

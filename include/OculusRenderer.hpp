@@ -74,10 +74,10 @@ private:
     GLuint rectVBO_[3];
 
     // Regular variables and normal types
-    bool initialized_;  // Represents the initialization of the whole class
     int winWidth_, winHeight_;
     int captureWidth_, captureHeight_;
     long long frameIndex_;
     double sensorSampleTime_;
+    bool initialized_ = false;  // Represents the initialization of the whole class
     bool isVisible_ = true;  // start as visible by default
 };

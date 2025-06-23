@@ -45,20 +45,13 @@ class InputProcessor:
         self.inputs['button_b'] = oculus_inputs[8]  # Button B (0-1)
         self.inputs['button_x'] = oculus_inputs[9]  # Button X (0-1)
         self.inputs['button_y'] = oculus_inputs[10]  # Button Y (0-1)
-        self.inputs['button_rt'] = oculus_inputs[11]  # Right Thumbstick (0-1)
-        self.inputs['button_lt'] = oculus_inputs[12]  # Left Thumbstick (0-1)
+        self.inputs['button_lt'] = oculus_inputs[11]  # Left Thumbstick (0-1)
+        self.inputs['button_rt'] = oculus_inputs[12]  # Right Thumbstick (0-1)
         self.inputs['left_trigger'] = oculus_inputs[13]  # Left Index Trigger [0,1]
         self.inputs['right_trigger'] = oculus_inputs[14]  # Right Index Trigger [0,1]
         self.inputs['left_grip'] = oculus_inputs[15]  # Left Grip [0,1]
         self.inputs['right_grip'] = oculus_inputs[16]  # Right Grip [0,1]
         self.create_standard_inputs()
-
-    def is_button_just_pressed(self, button_name):
-        if button_name not in self.inputs:
-            return False
-        if self.last_inputs is None:
-            return False
-        return self.inputs[button_name] > 0.5 and (self.last_inputs[button_name] <= 0.5)
 
     def katvr_data_processor(self, message):
         self.last_katvr_message_time = time.time()
