@@ -10,9 +10,10 @@ from data_logger import DataLogger
 
 # --- CONSTANTS ---
 FORWARD_VELOCITY_THRESHOLD = 1.7        # The minimum velocity obtained from KATVR to be considered as forward movement
-FORWARD_VELOCITY_CHANGE_LIMIT = 3.5    # The velocity limit above which the forward velocity is considered high
-FORWARD_VELOCITY_NORMAL = 0.25          # NORMAL SPEED
+FORWARD_VELOCITY_CHANGE_LIMIT = 3.5     # The velocity limit above which the forward velocity is considered high
+FORWARD_VELOCITY_NORMAL = 0.3           # NORMAL SPEED
 FORWARD_VELOCITY_HIGH = 0.5             # HIGH SPEED
+LATERAL_VELOCITY_LIMIT = 0.3            # Maximum lateral velocity for left/right walking
 
 TESTING_MODE = False  
 # False: Normal operation. Sends the data to the Oculus client.
@@ -24,69 +25,93 @@ TESTING_MODE = False
 # ======================================================================
 
 class KATVR:
-    """Represents the KATVR device properties and methods for processing data."""
+    """Represents the KATVR device properties and methods for processing data, including motion state tracking."""
     def __init__(self):
-        # KATVR device properties
-        self.previous_yaw = None
+        # Yaw tracking
+        self.previous_yaw_virtual = None
+        self.yaw_virtual = 0
         self.yaw = 0
-        self.current_delta_time = None
-        self.forward_velocity = 0
-        self.forward_velocity_normalized = 0
-        self.angular_velocity = 0
-        # Additional properties
-        self.is_active = False
-        self.last_message_time = None
 
-    def compute_forward_velocity_normalized(
-        self,
-        threshold=FORWARD_VELOCITY_THRESHOLD,
-        velocity_change_limit=FORWARD_VELOCITY_CHANGE_LIMIT,
-        normal_velocity=FORWARD_VELOCITY_NORMAL,
-        high_velocity=FORWARD_VELOCITY_HIGH
-    ):
-        """ 
-        Normalizes the forward velocity from the KATVR device to a range suitable for the Spot robot.
-        Updates the self.forward_velocity_normalized property.
-        """
-        if abs(self.forward_velocity) < threshold:
-            self.forward_velocity_normalized = 0.0
-        elif threshold <= abs(self.forward_velocity) < velocity_change_limit:
-            self.forward_velocity_normalized = normal_velocity if self.forward_velocity > 0 else -normal_velocity
-        else:
-            self.forward_velocity_normalized = high_velocity if self.forward_velocity > 0 else -high_velocity
-        
+        # Raw velocity from device
+        self.velocity = 0
+
+        # Velocity components
+        self.forward_velocity = 0
+        self.lateral_velocity = 0
+
+        # Time and angular velocity
+        self.delta_time = None
+        self.angular_velocity = 0
+
+        # Device state
+        self.is_active = False
+        self.last_update_time = None
+
+        # Walking Logic State Machine (Normal, Walking Left, Walking Right)
+        self.state = 'normal'  
+
+
+    def compute_velocity_components(self):
+        """Computes forward/lateral velocities based on current state using predefined constants."""
+        self.forward_velocity = 0
+        self.lateral_velocity = 0
+
+        if self.state == 'normal':
+            # Normalize forward velocity
+            if abs(self.velocity) < FORWARD_VELOCITY_THRESHOLD:
+                self.forward_velocity = 0.0
+            elif FORWARD_VELOCITY_THRESHOLD <= abs(self.velocity) < FORWARD_VELOCITY_CHANGE_LIMIT:
+                self.forward_velocity = FORWARD_VELOCITY_NORMAL if self.velocity > 0 else -FORWARD_VELOCITY_NORMAL
+            else:
+                self.forward_velocity = FORWARD_VELOCITY_HIGH if self.velocity > 0 else -FORWARD_VELOCITY_HIGH
+
+        elif self.state == 'walking_left':
+            self.lateral_velocity = max(-LATERAL_VELOCITY_LIMIT, min(0, self.velocity))  # Negative direction
+        elif self.state == 'walking_right':
+            self.lateral_velocity = min(LATERAL_VELOCITY_LIMIT, max(0, self.velocity))   # Positive direction
+
+
     def compute_angular_velocity(self):
-        """
-        Computes the angular velocity in radians per second based on the change in angle.
-        Updates the self.angular_velocity property.
-        """
-        if self.previous_yaw is None:
+        """Computes angular velocity using virtual yaw changes."""
+        if self.previous_yaw_virtual is None:
             self.angular_velocity = 0.0
             return
 
-        # Calculate the difference
-        delta_angle = self.yaw - self.previous_yaw
-        # Normalize the angle difference to the range [-180, 180]
+        delta_angle = self.yaw_virtual - self.previous_yaw_virtual
         delta_angle = (delta_angle + 180) % 360 - 180
-        # Compute angular velocity
-        angular_velocity_deg = delta_angle / self.current_delta_time
-        # Convert to radians
+        angular_velocity_deg = delta_angle / self.delta_time
         self.angular_velocity = math.radians(angular_velocity_deg)
 
-    def process_internal_values(self):
-        """
-        Processes the values obtained from the KATVR device.
-        This method is called in the main loop to update the KATVR properties.
-        """
+
+    def update_actual_yaw_and_state(self):
+        """Detects virtual yaw jumps and updates actual yaw and walking state."""
+        if self.previous_yaw_virtual is None:
+            return
+
+        delta_angle = self.yaw_virtual - self.previous_yaw_virtual
+        delta_angle = (delta_angle + 180) % 360 - 180
+
+        # Check for jump
+        if abs(delta_angle) >= 80:
+            if self.state == "normal":
+                if delta_angle > 0:
+                    self.state = "walking_left"
+                else:
+                    self.state = "walking_right" 
+            elif self.state == "walking_left" or self.state == "walking_right":
+                self.state = "normal"
         
-        # Compute the angular velocity
+        if self.state == "normal":
+            self.yaw = self.yaw_virtual
+
+
+    def process_internal_values(self):
+        """Main update loop for processing KATVR values."""
+        self.last_update_time = time.time() 
         self.compute_angular_velocity()
-
-        # Normalize forward velocity
-        self.compute_forward_velocity_normalized()
-
-        # Update previous yaw
-        self.previous_yaw = self.yaw
+        self.update_actual_yaw_and_state()
+        self.compute_velocity_components()
+        self.previous_yaw_virtual = self.yaw_virtual
 
 
 # ======================================================================
@@ -95,7 +120,7 @@ class KATVR:
 
 class KATVRManager:
     """Manages the KATVR device connection and data processing."""
-    def __init__(self, zmq_address="tcp://localhost:5555", udp_ip="127.0.0.1", udp_port=8002):
+    def __init__(self, zmq_address, udp_ip, udp_port):
         self.katvr = KATVR()
         self.testing_mode = TESTING_MODE
         # ZMQ setup
@@ -105,7 +130,6 @@ class KATVRManager:
         # UDP setup
         self.udp_ip = udp_ip
         self.udp_port = udp_port
-        self.udp_timeout = 0.5
         self.buffer_size = 1024
         
     # ================ HANDLING INCOMING UDP MESSAGES ================
@@ -113,44 +137,29 @@ class KATVRManager:
     def message_handler(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind((self.udp_ip, self.udp_port))
-        sock.settimeout(self.udp_timeout)
         print(f"🔵 Listening for UDP float arrays on {self.udp_ip}:{self.udp_port}...")
 
-        try:
-            while True:
-                if self._receive_and_process(sock):
-                    continue  # keep looping
-        except KeyboardInterrupt:
-            print("\nUDP listener interrupted.")
-        finally:
-            sock.close()
-
-    def _receive_and_process(self, sock):
-        try:
+        while True:
             data, addr = sock.recvfrom(self.buffer_size)
-        except socket.timeout:
-            return True  # Nothing received, loop again
+            if len(data) % 4 != 0:
+                print(f"⚠️ Incompatible data from {addr}.")
+                break
+            float_array = struct.unpack(f'{len(data) // 4}f', data)
+            if len(float_array) < 3:
+                print(f"⚠️ Expected at least 3 floats, got: {float_array}")
+                break
+            self._process_katvr_data(float_array)
 
-        if len(data) % 4 != 0:
-            print(f"⚠️ Malformed data from {addr} ({len(data)} bytes)")
-            return True
+        print("🔴 UDP listener has stopped.")
 
-        float_array = struct.unpack(f'{len(data) // 4}f', data)
-        self._process_katvr_data(float_array, addr)
-        return True
-
-    def _process_katvr_data(self, float_array, addr):
-        if len(float_array) < 3:
-            print(f"⚠️ Expected at least 3 floats, got: {float_array}")
-            return
-
+    def _process_katvr_data(self, float_array):
         if not self.katvr.is_active:
             self.katvr.is_active = True
-            print("KATVR connection established.")
+            print("✅ KATVR connection established.")
 
-        self.katvr.current_delta_time = float_array[0]
-        self.katvr.yaw = float_array[1]
-        self.katvr.forward_velocity = float_array[2]
+        self.katvr.delta_time = float_array[0]
+        self.katvr.yaw_virtual = float_array[1]
+        self.katvr.velocity = float_array[2]
         self.katvr.process_internal_values()
 
         if not self.testing_mode:
@@ -161,8 +170,8 @@ class KATVRManager:
     def send_to_oculus_client(self):
         data = {
             "yaw": round(self.katvr.yaw, 2),
-            # "velocity": round(self.katvr.forward_velocity_normalized, 2)
-            "velocity": 0.0
+            "forward_velocity": round(self.katvr.forward_velocity, 2),
+            "lateral_velocity": round(self.katvr.lateral_velocity, 2),
         }
         payload = json.dumps(data).encode("utf-8")
         self.socket.send_string("from_katvr", zmq.SNDMORE)
@@ -171,20 +180,22 @@ class KATVRManager:
     # ================ MONITORING LOOP ================
 
     def monitor_loop(self, update_interval=0.05):
-        """Continuously monitors and prints KATVR sensor data."""
+        """Continuously prints KATVR sensor data."""
         while True:
             if not self.katvr.is_active:
                 time.sleep(0.1)
                 continue
 
-            k = self.katvr
-            print(
-                f"YAW: {k.yaw:.2f}° | "
-                f"Forward Velocity: {k.forward_velocity:.2f} m/s ({k.forward_velocity_normalized:.2f}) | "
-                f"Angular Velocity: {k.angular_velocity:.2f} rad/s"
-                f"                  ",
-                end="\r"
-            )
+            if self.katvr.last_update_time is not None and time.time() - self.katvr.last_update_time > 0.2:
+                print("⚠️  Disconnected. Waiting for new data..." + " " * 50, end="\r")
+            else:
+                print(
+                    f"VirtYaw:{self.katvr.yaw_virtual:.1f}° (Yaw:{self.katvr.yaw:.1f}°) | State:{self.katvr.state} | "
+                    f"Vel:{self.katvr.velocity:.2f} (Fwd:{self.katvr.forward_velocity:.2f} Lat:{self.katvr.lateral_velocity:.2f})"
+                    + " " * 20,  # padding spaces to clear previous chars
+                    end="\r",
+                    flush=True
+                )
             time.sleep(update_interval)
 
     # ================ TESTING FUNCTIONS ================
@@ -227,9 +238,11 @@ class KATVRManager:
         input("TEST 2. Prepare to walk forward. Press ENTER when ready...")
         self.run_test("walking_forward", 30, 10)
 
+        input("TEST 3. Prepare to walk left/right. Press ENTER when ready...")
+        self.run_test("walking_lateral", 20, 10)
+
         print("\n=== TEST SEQUENCE ENDED ===")
 
-    
 
 # ================ MAIN ================
 if __name__ == "__main__":

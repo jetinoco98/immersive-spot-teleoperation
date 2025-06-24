@@ -43,8 +43,8 @@ class OculusClient:
 def main(broker_address):
     # Initialize variables and threads
     oculus = OculusClient(broker_address)
-    iproc = InputProcessor()
-    threading.Thread(target=iproc.receive_from_zmq, daemon=True).start() # Start the ZMQ receiver thread
+    input_processor = InputProcessor()
+    threading.Thread(target=input_processor.receive_from_zmq, daemon=True).start() # Start the ZMQ receiver thread
 
     try:
         # Temporary: PID config
@@ -54,21 +54,21 @@ def main(broker_address):
 
         while True:
             # Wait for inputs to be received
-            if not iproc.inputs:
+            if not input_processor.inputs:
                 time.sleep(0.5)
                 continue
             
-            if iproc.is_katvr_active() and iproc.alternative_inputs:
-                live.update(dict_to_table("Alternative Inputs", iproc.alternative_inputs))
-                payload = json.dumps(iproc.alternative_inputs)
+            if input_processor.is_katvr_active() and input_processor.alternative_inputs:
+                live.update(dict_to_table("Alternative Inputs", input_processor.alternative_inputs))
+                payload = json.dumps(input_processor.alternative_inputs)
                 oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
-            elif iproc.standard_inputs:
-                live.update(dict_to_table("Standard Inputs", iproc.standard_inputs))
-                payload = json.dumps(iproc.standard_inputs)
+            elif input_processor.standard_inputs:
+                live.update(dict_to_table("Standard Inputs", input_processor.standard_inputs))
+                payload = json.dumps(input_processor.standard_inputs)
                 oculus.client.publish(topic="spot/inputs", payload=payload)
 
             # Temporary: Send PID config periodically
-            if iproc.is_katvr_active():
+            if input_processor.is_katvr_active():
                 now = time.time()
                 if now - last_sent_time > 1:  # Send data every second
                     with open(config_path, "r") as f:

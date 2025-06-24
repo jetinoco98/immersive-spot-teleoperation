@@ -58,7 +58,8 @@ class InputProcessor:
         katvr_data = json.loads(message.decode('utf-8'))
         if self.inputs:
             self.inputs['katvr_yaw'] = katvr_data["yaw"]  # In degrees
-            self.inputs['katvr_velocity'] = katvr_data["velocity"]  # Forward velocity in m/s
+            self.inputs['katvr_forward_velocity'] = katvr_data["forward_velocity"]  # Forward velocity in m/s
+            self.inputs['katvr_lateral_velocity'] = katvr_data["lateral_velocity"]  # Lateral velocity in m/s
             self.create_alternative_inputs()
 
     def is_katvr_active(self):
@@ -88,7 +89,8 @@ class InputProcessor:
             'hdm_pitch': self.inputs['hmd_pitch'],  # HDM Pitch (radians)
             'hdm_roll': self.inputs['hmd_roll'],  # HDM Roll (radians)
             'katvr_yaw': self.katvr.yaw,  # KATVR Yaw (degrees)
-            'katvr_velocity': self.inputs['katvr_velocity'],  # KATVR Forward Velocity (m/s)
+            'katvr_forward_velocity': self.inputs['katvr_forward_velocity'],  # KATVR Forward Velocity (m/s)
+            'katvr_lateral_velocity': self.inputs['katvr_lateral_velocity'],  # KATVR Lateral Velocity (m/s)
             'stand': self.inputs['button_a'],  # Command: Stand
             'sit': self.inputs['button_b'],  # Command: Sit
             'move_forward': self.inputs['right_joystick_y'],  # Move Forward

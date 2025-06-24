@@ -5,7 +5,6 @@ import paho.mqtt.client as mqtt
 import json
 import threading
 import time
-import sys
 from spot_interface import SpotInterface
 from zed_interface import ZEDInterface
 from input_controller import Controller

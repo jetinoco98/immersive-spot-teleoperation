@@ -14,6 +14,7 @@ import math
 import numpy as np
 import os
 import sys
+from simple_pid import PID
 import bosdyn.api.spot.robot_command_pb2 as spot_command_pb2
 import bosdyn.client.util
 from bosdyn import geometry
@@ -62,18 +63,12 @@ class SpotInterface:
 
         # === For KATVR integration
         self._odom_yaw = None
-        self._calibrated_with_katvr = False
         self._katvr_yaw_offset = 0.0
-        # PID controller state for KATVR yaw control
-        self._yaw_error = 0.0
-        self._prev_yaw_error = 0.0
-        self._prev_time = time.time()
-        # PID controller default parameters for KATVR yaw control
-        self._pid_kp = 1.2
-        self._pid_kd = 0.2
-        self._pid_dead_zone_deg = 2.0
-        self._pid_max_v_rot = 1.0
-        # === End of KATVR integration variables
+        self._calibrated_with_katvr = False
+        # PID controller
+        self.pid = PID(kp=1.0, ki=0.0, kd=0.0, setpoint=0.0, output_limits=(-1.5, 1.5))
+        self._yaw_error = 0.0  # Error in radians
+        self._dead_zone = math.radians(2.0)  # Dead zone in radians
 
         # === INITIALIZATION
         sdk = create_standard_sdk("spot_interface")
@@ -215,7 +210,6 @@ class SpotInterface:
     def stand(self):
         blocking_stand(self._robot_command_client)
 
-
     def sit(self):
         blocking_sit(self._robot_command_client)
 
@@ -316,47 +310,32 @@ class SpotInterface:
         self._odom_yaw = euler.yaw  # Update the class variable
 
 
-    def update_pid_controller(self, kp, kd, dead_zone_degrees, max_v_rot_rad_s):
+    def update_pid_controller(self, kp, kd, dead_zone_degrees):
         """
         Update the PID controller parameters for KATVR yaw control.
         """
-        self._pid_kp = kp
-        self._pid_kd = kd
-        self._pid_dead_zone_deg = dead_zone_degrees
-        self._pid_max_v_rot = max_v_rot_rad_s
+        self.pid.tunings = (kp, 0.0, kd) # Set kp and kd, ki=0.0
+        self._dead_zone = math.radians(dead_zone_degrees)  # Convert dead zone from degrees to radians
 
 
     def _compute_angular_velocity(self, katvr_yaw_deg):
         """Compute rotational velocity using PID control to align yaw with KATVR."""
         self.update_odometry_angles()
-
         target_yaw_rad = math.radians(katvr_yaw_deg)
 
         if not self._calibrated_with_katvr:
             self._katvr_yaw_offset = target_yaw_rad - self._odom_yaw
             self._calibrated_with_katvr = True
-            self._prev_yaw_error = 0.0
-            self._prev_time = time.time()
+            self.pid.reset()  # Reset PID controller state after calibration
             return 0.0
 
         target_robot_yaw = target_yaw_rad - self._katvr_yaw_offset
         self.yaw_error = (target_robot_yaw - self._odom_yaw + np.pi) % (2 * np.pi) - np.pi
 
-        now = time.time()
-        dt = now - self._prev_time
-        self._prev_time = now
-
-        d_error = (self.yaw_error - self._prev_yaw_error) / dt if dt > 0 else 0.0
-        self._prev_yaw_error = self.yaw_error
-
-        DEAD_ZONE_RAD = math.radians(self._pid_dead_zone_deg)
-        if abs(self.yaw_error) < DEAD_ZONE_RAD:
+        if abs(self.yaw_error) < self._dead_zone:
             return 0.0
 
-        # PID calculation
-        v_rot = self._pid_kp * self.yaw_error + self._pid_kd * d_error
-        v_rot = max(-self._pid_max_v_rot, min(self._pid_max_v_rot, v_rot))
-        return v_rot
+        return self.pid(self.yaw_error)
     
     
     def set_katvr_command(self, inputs):
@@ -367,7 +346,8 @@ class SpotInterface:
 
         # === Parse inputs ===
         katvr_yaw_deg = inputs['katvr_yaw']
-        self._v_x = inputs['katvr_velocity']
+        self._v_x = inputs['katvr_forward_velocity']
+        self._v_y = inputs['katvr_lateral_velocity']
         speed_lock = bool(inputs['speed_lock'])
         rotation_lock = bool(inputs['rotation_lock'])
 
@@ -383,7 +363,7 @@ class SpotInterface:
         if rotation_lock:
             self._v_rot = 0.0
         else:
-            # === Rotation control with PID ===
+            # === Rotation control with PD ===
             self._v_rot = self._compute_angular_velocity(katvr_yaw_deg)
 
         # === Send command to robot ===
