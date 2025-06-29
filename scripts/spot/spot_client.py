@@ -60,13 +60,12 @@ class SpotClient:
         # === TEMPORARY: PID CONFIGURATION ===
         if msg.topic == self.sub_topic_spot_config:
             payload = msg.payload.decode()
-            config = json.loads(payload)
+            config: dict = json.loads(payload)
             # Update the PID controller configuration
             self.interface.update_pid_controller(
-                config.get("kp", 0.5),
-                config.get("kd", 0.2),
-                config.get("dead_zone_degrees", 5.0),
-                config.get("max_v_rot_rad_s", 0.5)  
+                config.get("kp"),
+                config.get("kd"),
+                config.get("dead_zone_degrees")
             )
 
         
@@ -140,8 +139,8 @@ class SpotClient:
         touch_controls = self.controller.get_touch_controls(touch_inputs_alternative)
 
         # Set the controls for the robot.
-        # Note: HDM and Touch Controls are set on KATVR command function
-        self.interface.set_touch_controls_with_katvr(touch_controls)
+        # Note: HDM Controls are set inside KATVR command function
+        self.interface.set_touch_controls(touch_controls)
         self.interface.set_katvr_command(self.alternative_inputs, hmd_controls)
 
 
@@ -165,9 +164,9 @@ class SpotClient:
                     if self.robot_stand:
                         self.interface.set_idle_mode()
 
-                self.interface.print_spot_velocity_values()
+                self.interface.print_spot_motion_status()
 
-                # Maintain a maximum control loop frequency of 20 Hz if possible
+                # Maintain a maximum control loop frequency of 20 Hz
                 elapsed_time = time.time() - t0
                 if elapsed_time < 1/20:
                     time.sleep(1/20 - elapsed_time)

@@ -103,7 +103,7 @@ class InputProcessor:
             'move_forward': self.inputs['right_joystick_y'],  # Move Forward
             'move_lateral': self.inputs['right_joystick_x'],  # Move Lateral
             'rotate': self.inputs['left_joystick_x'],  # Rotate
-            'speed_lock': (1.0 if self.inputs['right_grip'] > 0.5 else 0.0),  # Speed Lock (1.0 if pressed, else 0.0)
-            'rotation_lock': (1.0 if self.inputs['right_trigger'] > 0.5 else 0.0),  # Rotation Lock (1.0 if pressed, else 0.0)
+            'speed_lock': (1.0 if self.inputs['right_trigger'] > 0.5 else 0.0),  # Speed Lock (1.0 if pressed, else 0.0)
+            'rotation_lock': (1.0 if self.inputs['right_grip'] > 0.5 else 0.0),  # Rotation Lock (1.0 if pressed, else 0.0)
         }
 

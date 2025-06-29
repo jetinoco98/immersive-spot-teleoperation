@@ -5,7 +5,7 @@ from matplotlib import rcParams
 import matplotlib.pyplot as plt
 
 
-INPUT_THRESHOLD = 0.3
+INPUT_THRESHOLD = 0.2  # Threshold for joystick inputs to be considered active
 VELOCITY_BASE_SPEED = 0.5  # m/s
 VELOCITY_BASE_ANGULAR = 0.5  # rad/s
 

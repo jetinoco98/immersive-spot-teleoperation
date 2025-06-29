@@ -79,10 +79,9 @@ def main(broker_address):
                     with open(config_path, "r") as f:
                         config = json.load(f)
                     config_out = {
-                        "kp": config.get("Kp", 1.2),
-                        "kd": config.get("Kd", 0.05),
-                        "dead_zone_degrees": config.get("DEAD_ZONE_DEGREES", 2.0),
-                        "max_v_rot_rad_s": config.get("MAX_V_ROT_RAD_S", 1.5)
+                        "kp": config.get("KP", 1.5),
+                        "kd": config.get("KD", 0.1),
+                        "dead_zone_degrees": config.get("DEAD_ZONE_DEGREES", 1.0)
                     }
                     payload = json.dumps(config_out)
                     oculus.client.publish(topic="spot/config", payload=payload)

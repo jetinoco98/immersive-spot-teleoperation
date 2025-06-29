@@ -62,3 +62,8 @@ class ZEDInterface:
     def shutdown(self):
         self.zed.close()
         print("\nShutting down ZEDInterface.")
+
+
+if __name__ == "__main__":
+    zed = ZEDInterface()
+    zed.start_streaming("100.119.186.122")
