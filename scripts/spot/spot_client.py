@@ -63,10 +63,10 @@ class SpotClient:
             config = json.loads(payload)
             # Update the PID controller configuration
             self.interface.update_pid_controller(
-                config.get("kp", 1.2),
+                config.get("kp", 0.5),
                 config.get("kd", 0.2),
-                config.get("dead_zone_degrees", 2.0),
-                config.get("max_v_rot_rad_s", 1.0)
+                config.get("dead_zone_degrees", 5.0),
+                config.get("max_v_rot_rad_s", 0.5)  
             )
 
         
@@ -135,28 +135,29 @@ class SpotClient:
         touch_inputs_alternative = [
             self.alternative_inputs['move_forward'],  # Right Controller Y (0-1): Forward/Backward
             self.alternative_inputs['move_lateral'],  # Right Controller X (0-1): Right/Left
-            0.0,       # Control for angular velocity (not used in this case)
+            self.alternative_inputs['rotate'],        # Left Controller X (0-1): Angular Velocity
         ]
         touch_controls = self.controller.get_touch_controls(touch_inputs_alternative)
-        touch_controls[2] = None    # No rotation control for KATVR
 
         # Set the controls for the robot.
-        self.interface.set_hmd_controls(hmd_controls)
-        self.interface.set_touch_controls(touch_controls)
-        self.interface.set_katvr_command(self.alternative_inputs)
+        # Note: HDM and Touch Controls are set on KATVR command function
+        self.interface.set_touch_controls_with_katvr(touch_controls)
+        self.interface.set_katvr_command(self.alternative_inputs, hmd_controls)
 
 
     def control_loop(self):
         try:
             while True:
                 t0 = time.time()
+                time_difference_std = time.time() - (self.standard_inputs_last_message_time if self.standard_inputs_last_message_time else 0)
+                time_difference_alt = time.time() - (self.alternative_inputs_last_message_time if self.alternative_inputs_last_message_time else 0)
 
                 # Process standard inputs if available
-                if self.standard_inputs and (time.time() - self.standard_inputs_last_message_time < 0.2):
+                if self.standard_inputs and (time_difference_std < 1.0):
                     self.process_standard_inputs()
 
                 # Process alternative inputs if available (KATVR)
-                elif self.alternative_inputs and (time.time() - self.alternative_inputs_last_message_time < 0.2):
+                elif self.alternative_inputs and (time_difference_alt < 1.0):
                     self.process_alternative_inputs()
 
                 else:
@@ -164,13 +165,13 @@ class SpotClient:
                     if self.robot_stand:
                         self.interface.set_idle_mode()
 
-                # Sleep to maintain a control loop frequency of 10Hz
+                self.interface.print_spot_velocity_values()
+
+                # Maintain a maximum control loop frequency of 20 Hz if possible
                 elapsed_time = time.time() - t0
-                if elapsed_time < 0.1:
-                    time.sleep(0.1 - elapsed_time)
-                else:
-                    print(f"Warning: Control loop took too long ({elapsed_time:.2f} seconds), skipping sleep.")
-                
+                if elapsed_time < 1/20:
+                    time.sleep(1/20 - elapsed_time)
+
         except KeyboardInterrupt:
             pass
 
@@ -194,7 +195,7 @@ if __name__ == '__main__':
         'ip_address',
         type=str,
         nargs='?',
-        default='48.209.18.239',
+        default='100.119.186.122',
         help='The IP address of the RTSP server'
     )
     args = parser.parse_args()

@@ -58,10 +58,10 @@ private:
     std::unique_ptr<Shader> shader_;
 
     // Objects from external libraries (Oculus, SDL, OpenGL, OpenCV)
-    ovrSession& session_;  // reference member, no copy
+    ovrSession& session_;
     SDL_Window* window_;
     SDL_GLContext glContext_;
-    SDL_Event events_;   // SDL variable that will be used to store input events
+    SDL_Event events_;
     ovrHmdDesc hmdDesc_;
     ovrTextureSwapChain textureChain_;
     ovrMirrorTexture mirrorTexture_ = nullptr;
@@ -79,5 +79,5 @@ private:
     long long frameIndex_;
     double sensorSampleTime_;
     bool initialized_ = false;  // Represents the initialization of the whole class
-    bool isVisible_ = true;  // start as visible by default
+    bool isVisible_ = true;     // Starts as visible by default
 };

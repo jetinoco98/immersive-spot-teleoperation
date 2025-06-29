@@ -23,7 +23,8 @@ class DataLogger:
                 break
             n += 1
 
-        self.fields = ["timestamp", "yaw", "forward_velocity", "lateral_velocity", "angular_velocity"]
+        self.fields = ["timestamp", "yaw", "yaw_virtual", "velocity", "filtered_velocity",
+                       "forward_velocity", "lateral_velocity", "angular_velocity"]
         self.file = open(self.file_path, mode="w", newline='')
         self.writer = csv.DictWriter(self.file, fieldnames=self.fields)
         self.writer.writeheader()
@@ -32,6 +33,9 @@ class DataLogger:
         self.writer.writerow({
             "timestamp": time.time(),
             "yaw": katvr.yaw,
+            "yaw_virtual": katvr.yaw_virtual,
+            "velocity": katvr.velocity,
+            "filtered_velocity": katvr.filtered_velocity,
             "forward_velocity": katvr.forward_velocity,
             "lateral_velocity": katvr.lateral_velocity,
             "angular_velocity": katvr.angular_velocity

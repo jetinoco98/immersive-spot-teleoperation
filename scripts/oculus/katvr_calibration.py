@@ -2,10 +2,8 @@ import math
 
 class KATVRCalibration:
     def __init__(self):
-        # KATVR device properties
         self.hdm_yaw = None
         self.yaw = None
-        # Calibration properties
         self.requires_hdm_calibration = True
         self.offset = 0
 

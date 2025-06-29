@@ -500,8 +500,8 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
 {
     /*
     Note: Even if we don't ask to refresh the framebuffer or if the Camera::grab()
-            doesn't catch a new frame, we have to submit an image to the Rift; it
-            needs 75Hz refresh. Else there will be jumbs, black frames and/or glitches
+            doesn't catch a new frame, we have to submit an image to the Oculus; it
+            needs 75Hz refresh. Otherwise there will be jumbs, black frames and/or glitches
             in the headset.
     */
     ovrLayerEyeFov ld;

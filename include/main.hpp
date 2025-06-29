@@ -34,14 +34,14 @@ struct AppConfig {
     std::string stream_address;
 };
 
-// Function declarations
+// Function declaration
 bool InitOculus(ovrSession& session);
 void runPythonScript(const std::string& relativeScriptPath, const std::string& args = "");
 RPY quaternionToRPY(const ovrTrackingState& ts);
 void getOculusInput(float* data, ovrSession& session);
 AppConfig LoadAppConfig(const std::string& filename = "config.json");
 
-// Class declarations
+// Class declaration
 class ZMQPublisher {
 public:
     ZMQPublisher(const std::string& address);

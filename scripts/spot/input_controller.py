@@ -5,7 +5,7 @@ from matplotlib import rcParams
 import matplotlib.pyplot as plt
 
 
-INPUT_THRESHOLD = 0.5
+INPUT_THRESHOLD = 0.3
 VELOCITY_BASE_SPEED = 0.5  # m/s
 VELOCITY_BASE_ANGULAR = 0.5  # rad/s
 
@@ -63,8 +63,9 @@ class TouchController:
         ]
 
     def _compute_control(self, value, base_speed):
-        return base_speed if abs(value) > INPUT_THRESHOLD and value > 0 else \
-               -base_speed if abs(value) > INPUT_THRESHOLD else 0
+        if abs(value) > INPUT_THRESHOLD:
+            return value * base_speed
+        return 0
 
 
 class Controller:

@@ -1,7 +1,7 @@
 #include "main.hpp"
 
 #include <chrono>
-#include <thread>  // To simulate a delay
+#include <thread>
 
 // ============================================================================
 //                                 MAIN FUNCTION
@@ -26,9 +26,7 @@ int main(int argc, char* argv[])
     
     // Execute python scripts
     runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", config.ip_address);
-    if (config.use_katvr) {
-        runPythonScript("\\..\\..\\scripts\\katvr\\katvr.py");
-    }
+    if (config.use_katvr) {runPythonScript("\\..\\..\\scripts\\katvr\\katvr.py");}
 
 	// Initialize ZMQ Socket
     ZMQPublisher zmq("tcp://localhost:5555");
@@ -53,6 +51,17 @@ int main(int argc, char* argv[])
         // --- Send HDM data over ZeroMQ socket
         zmq.send("from_hdm", data, sizeof(data));
 
+        // --- Check if the HMD is still present
+        ovrSessionStatus sessionStatus;
+        if (OVR_SUCCESS(ovr_GetSessionStatus(oculus_session, &sessionStatus))) {
+            if (!sessionStatus.HmdPresent) {
+                printf("HMD is not present. Exiting...\n");
+                break;  // or handle reconnection logic
+            }
+        }
+
+        // --- Sleep for a short duration (only when renderer is disabled)
+        // std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     return 0;

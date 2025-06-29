@@ -55,18 +55,23 @@ def main(broker_address):
         while True:
             # Wait for inputs to be received
             if not input_processor.inputs:
-                time.sleep(0.5)
+                time.sleep(0.1)
                 continue
-            
+
+            if not input_processor.is_oculus_active():
+                time.sleep(0.01)
+                continue
+
             if input_processor.is_katvr_active() and input_processor.alternative_inputs:
                 live.update(dict_to_table("Alternative Inputs", input_processor.alternative_inputs))
                 payload = json.dumps(input_processor.alternative_inputs)
                 oculus.client.publish(topic="spot/inputs_with_katvr", payload=payload)
+
             elif input_processor.standard_inputs:
                 live.update(dict_to_table("Standard Inputs", input_processor.standard_inputs))
                 payload = json.dumps(input_processor.standard_inputs)
                 oculus.client.publish(topic="spot/inputs", payload=payload)
-
+            
             # Temporary: Send PID config periodically
             if input_processor.is_katvr_active():
                 now = time.time()

@@ -10,6 +10,7 @@ class InputProcessor:
         self.inputs: dict = {}
         self.standard_inputs: dict = {}
         self.alternative_inputs: dict = {}
+        self.last_oculus_message_time = None
         # KATVR integration properties
         self.katvr: KATVRCalibration = KATVRCalibration()
         self.last_katvr_message_time = None
@@ -33,6 +34,7 @@ class InputProcessor:
                 self.katvr_data_processor(message)
 
     def oculus_data_processor(self, message):
+        self.last_oculus_message_time = time.time()
         oculus_inputs = list(struct.unpack('17f', message))
         self.inputs['hmd_yaw'] = oculus_inputs[0]  # In radians
         self.inputs['hmd_pitch'] = oculus_inputs[1]  # In radians
@@ -67,6 +69,11 @@ class InputProcessor:
             return False  # KATVR is not active if no message has been received yet
         return time.time() - self.last_katvr_message_time < 10  # Active if last message was received within 10 seconds
     
+    def is_oculus_active(self):
+        if not self.last_oculus_message_time:
+            return False
+        return time.time() - self.last_oculus_message_time < 5  # Active if last message was received within 5 seconds
+
     def create_standard_inputs(self):
         self.standard_inputs = {
             'hmd_yaw': self.inputs['hmd_yaw'],  # In radians
@@ -95,6 +102,7 @@ class InputProcessor:
             'sit': self.inputs['button_b'],  # Command: Sit
             'move_forward': self.inputs['right_joystick_y'],  # Move Forward
             'move_lateral': self.inputs['right_joystick_x'],  # Move Lateral
+            'rotate': self.inputs['left_joystick_x'],  # Rotate
             'speed_lock': (1.0 if self.inputs['right_grip'] > 0.5 else 0.0),  # Speed Lock (1.0 if pressed, else 0.0)
             'rotation_lock': (1.0 if self.inputs['right_trigger'] > 0.5 else 0.0),  # Rotation Lock (1.0 if pressed, else 0.0)
         }

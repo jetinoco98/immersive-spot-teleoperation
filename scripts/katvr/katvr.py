@@ -9,16 +9,18 @@ from data_logger import DataLogger
 
 
 # --- CONSTANTS ---
-FORWARD_VELOCITY_THRESHOLD = 1.7        # The minimum velocity obtained from KATVR to be considered as forward movement
-FORWARD_VELOCITY_CHANGE_LIMIT = 3.5     # The velocity limit above which the forward velocity is considered high
-FORWARD_VELOCITY_NORMAL = 0.3           # NORMAL SPEED
+FORWARD_VELOCITY_THRESHOLD = 1.0        # The minimum velocity obtained from KATVR to be considered as forward movement
+FORWARD_VELOCITY_CHANGE_LIMIT = 3.0     # The velocity limit above which the forward velocity is considered high
+FORWARD_VELOCITY_NORMAL = 0.4           # NORMAL SPEED
 FORWARD_VELOCITY_HIGH = 0.5             # HIGH SPEED
-LATERAL_VELOCITY_LIMIT = 0.3            # Maximum lateral velocity for left/right walking
+# ---
+LATERAL_VELOCITY_THRESHOLD = 1.0        # The minimum velocity from which lateral movement is considered
+LATERAL_VELOCITY_VALUE = 0.25           # A transformed value to be used for lateral velocity
 
-TESTING_MODE = False  
-# False: Normal operation. Sends the data to the Oculus client.
+# --- TESTING MODE ---
 # True: Testing mode. Performs an interactive test sequence.
-
+# False: Normal operation. Sends the data to the Oculus client.
+TESTING_MODE = False  
 
 # ======================================================================
 #                           KATVR DEVICE CLASS
@@ -30,10 +32,13 @@ class KATVR:
         # Yaw tracking
         self.previous_yaw_virtual = None
         self.yaw_virtual = 0
+        self.previous_yaw = None
         self.yaw = 0
 
         # Raw velocity from device
         self.velocity = 0
+        self.filtered_velocity = 0
+        self.velocity_smoothing_factor = 0.2  # 0 < alpha < 1; lower = smoother
 
         # Velocity components
         self.forward_velocity = 0
@@ -48,7 +53,13 @@ class KATVR:
         self.last_update_time = None
 
         # Walking Logic State Machine (Normal, Walking Left, Walking Right)
-        self.state = 'normal'  
+        self.state = 'normal' 
+
+
+    def smooth_velocity(self):
+        """Applies low-pass filter to raw velocity to smooth step transitions."""
+        alpha = self.velocity_smoothing_factor
+        self.filtered_velocity = alpha * self.velocity + (1 - alpha) * self.filtered_velocity 
 
 
     def compute_velocity_components(self):
@@ -57,28 +68,29 @@ class KATVR:
         self.lateral_velocity = 0
 
         if self.state == 'normal':
-            # Normalize forward velocity
-            if abs(self.velocity) < FORWARD_VELOCITY_THRESHOLD:
+            if abs(self.filtered_velocity) < FORWARD_VELOCITY_THRESHOLD:
                 self.forward_velocity = 0.0
-            elif FORWARD_VELOCITY_THRESHOLD <= abs(self.velocity) < FORWARD_VELOCITY_CHANGE_LIMIT:
-                self.forward_velocity = FORWARD_VELOCITY_NORMAL if self.velocity > 0 else -FORWARD_VELOCITY_NORMAL
+            elif FORWARD_VELOCITY_THRESHOLD <= abs(self.filtered_velocity) < FORWARD_VELOCITY_CHANGE_LIMIT:
+                self.forward_velocity = FORWARD_VELOCITY_NORMAL if self.filtered_velocity > 0 else -FORWARD_VELOCITY_NORMAL
             else:
-                self.forward_velocity = FORWARD_VELOCITY_HIGH if self.velocity > 0 else -FORWARD_VELOCITY_HIGH
+                self.forward_velocity = FORWARD_VELOCITY_HIGH if self.filtered_velocity > 0 else -FORWARD_VELOCITY_HIGH
+
+        elif self.state == 'walking_right':
+            if abs(self.filtered_velocity) >= LATERAL_VELOCITY_THRESHOLD:
+                self.lateral_velocity = -LATERAL_VELOCITY_VALUE
 
         elif self.state == 'walking_left':
-            self.lateral_velocity = max(-LATERAL_VELOCITY_LIMIT, min(0, self.velocity))  # Negative direction
-        elif self.state == 'walking_right':
-            self.lateral_velocity = min(LATERAL_VELOCITY_LIMIT, max(0, self.velocity))   # Positive direction
+            if abs(self.filtered_velocity) >= LATERAL_VELOCITY_THRESHOLD:
+                self.lateral_velocity = LATERAL_VELOCITY_VALUE
 
 
     def compute_angular_velocity(self):
         """Computes angular velocity using virtual yaw changes."""
-        if self.previous_yaw_virtual is None:
+        if self.previous_yaw is None:
             self.angular_velocity = 0.0
             return
 
-        delta_angle = self.yaw_virtual - self.previous_yaw_virtual
-        delta_angle = (delta_angle + 180) % 360 - 180
+        delta_angle = (self.yaw - self.previous_yaw + 180) % 360 - 180
         angular_velocity_deg = delta_angle / self.delta_time
         self.angular_velocity = math.radians(angular_velocity_deg)
 
@@ -110,8 +122,10 @@ class KATVR:
         self.last_update_time = time.time() 
         self.compute_angular_velocity()
         self.update_actual_yaw_and_state()
+        self.smooth_velocity()
         self.compute_velocity_components()
         self.previous_yaw_virtual = self.yaw_virtual
+        self.previous_yaw = self.yaw
 
 
 # ======================================================================
@@ -233,18 +247,18 @@ class KATVRManager:
         print("\n=== KATVR SENSOR TEST SEQUENCE ===\n")
 
         input("TEST 1. Prepare to turn in place. Press ENTER when ready...")
-        self.run_test("turning_in_place", 30, 10)
+        self.run_test("turning_in_place", 20, 10)
 
-        input("TEST 2. Prepare to walk forward. Press ENTER when ready...")
-        self.run_test("walking_forward", 30, 10)
-
-        input("TEST 3. Prepare to walk left/right. Press ENTER when ready...")
-        self.run_test("walking_lateral", 20, 10)
+        input("TEST 2. Prepare to walk. Press ENTER when ready...")
+        self.run_test("walking", 20, 10)
 
         print("\n=== TEST SEQUENCE ENDED ===")
 
 
-# ================ MAIN ================
+# ======================================================================
+#                                MAIN
+# ======================================================================
+
 if __name__ == "__main__":
     katvr_manager = KATVRManager(zmq_address="tcp://localhost:5555", udp_ip="127.0.0.1", udp_port=8002)
     threading.Thread(target=katvr_manager.message_handler, daemon=True).start()

@@ -10,9 +10,6 @@ cmake_policy(SET CMP0146 NEW)
 # System Libraries
 find_package(OpenGL REQUIRED)
 
-# find_package(ZED REQUIRED)  # User must install manually
-# find_package(CUDAToolkit REQUIRED)  # User must install manually
-
 # OpenCV binaries stored on the project external folder
 set(OpenCV_DIR "${CMAKE_SOURCE_DIR}/external/opencv")
 find_package(OpenCV REQUIRED)
@@ -30,7 +27,6 @@ target_include_directories(core_lib INTERFACE
     ${CMAKE_SOURCE_DIR}/external/ovr_sdk/LibOVR/Include
     ${CMAKE_SOURCE_DIR}/external/json
     ${OpenCV_INCLUDE_DIRS}
-    # ${ZED_INCLUDE_DIRS}
 )
 
 # Link directories
@@ -50,8 +46,6 @@ target_link_libraries(core_lib INTERFACE
     OpenGL::GL
     LibOVR
     ${OpenCV_LIBS}
-    # ${ZED_LIBRARIES}
-    # CUDA::cudart 
 )
 
 # Define the main executables
