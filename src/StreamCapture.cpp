@@ -8,7 +8,7 @@
 
 StreamCapture::StreamCapture(const std::string& stream_address) {
     // Build the pipeline string
-    pipeline_ = "rtspsrc location=" + stream_address + " latency=50 ! "
+    pipeline_ = "rtspsrc protocols=tcp location=" + stream_address + " latency=0 ! "
                 "rtph264depay ! h264parse ! decodebin ! videoconvert ! "
                 "video/x-raw, format=BGR ! appsink";
 }
@@ -69,8 +69,8 @@ void StreamCapture::captureLoop() {
             cv::Rect roi2(frame.cols / 2, 0, frame.cols / 2, frame.rows);
             buffer_.rightImage = frame(roi2).clone(); // Use clone() to copy the data
 
-            buffer_.mtx.unlock();
             buffer_.new_frame = true;
+            buffer_.mtx.unlock();
         }
         else
             std::this_thread::sleep_for(std::chrono::milliseconds(2)); // DEBUG 
