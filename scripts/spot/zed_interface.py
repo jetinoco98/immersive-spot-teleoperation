@@ -1,6 +1,20 @@
 import pyzed.sl as sl
 import cv2
+<<<<<<< HEAD
 import argparse
+=======
+import time
+import sys
+
+QUALITY_PRESETS = {
+    1: {"resolution": (1280, 360), "fps": 30},
+    2: {"resolution": (1280, 360), "fps": 60},
+    3: {"resolution": (1280, 480), "fps": 30},
+    4: {"resolution": (1280, 480), "fps": 60},
+    5: {"resolution": (1280, 720), "fps": 30},
+    6: {"resolution": (1280, 720), "fps": 60},
+}
+>>>>>>> c0de504964afb2649d7b8cc36dc0422894bf44e2
 
 class ZEDInterface:
     def __init__(self):
