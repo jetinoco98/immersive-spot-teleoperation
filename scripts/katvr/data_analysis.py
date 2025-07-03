@@ -108,6 +108,41 @@ def analyze_forward_motion_log(filename):
     plt.show()
 
 
+def analyze_lateral_motion_log(filename):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logs_dir = os.path.join(script_dir, "logs")
+    file_path = os.path.join(logs_dir, filename)
+
+    df = pd.read_csv(file_path)
+    df['timestamp'] -= df['timestamp'].min()  # Normalize time
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), sharex=True)
+    fig.suptitle(f"Lateral Motion Analysis: {os.path.basename(file_path)}")
+
+    # Left subplot: Lateral velocity
+    ax1.plot(df['timestamp'], df['lateral_velocity'], label='Lateral Velocity', color='purple')
+    ax1.set_title("Lateral Velocity")
+    ax1.set_xlabel("Time (s)")
+    ax1.set_ylabel("Lateral Velocity (m/s)")
+    ax1.legend()
+    ax1.grid(True)
+
+    # Right subplot: Virtual yaw
+    if 'virtual_yaw' in df.columns:
+        ax2.plot(df['timestamp'], df['virtual_yaw'], label='Virtual Yaw (°)', color='teal')
+        ax2.set_ylabel("Virtual Yaw (°)")
+    else:
+        ax2.plot(df['timestamp'], df['yaw'], label='Yaw (°)', color='orange')
+        ax2.set_ylabel("Yaw (°)")
+    ax2.set_title("Virtual Yaw")
+    ax2.set_xlabel("Time (s)")
+    ax2.legend()
+    ax2.grid(True)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.show()
+
+
 if __name__ == "__main__":
     try:
         analyze_turn_log("katvr_log_turning_in_place.csv")
@@ -118,3 +153,8 @@ if __name__ == "__main__":
         analyze_forward_motion_log("katvr_log_walking.csv")
     except FileNotFoundError:
         print("Log file for walking forward not found. Please ensure the file exists in the logs directory.")
+
+    try:
+        analyze_lateral_motion_log("katvr_log_lateral_movement.csv")
+    except FileNotFoundError:
+        print("Log file for lateral movement not found. Please ensure the file exists in the logs directory.")

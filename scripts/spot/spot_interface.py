@@ -56,6 +56,7 @@ class SpotInterface:
         self._v_rot = 0.0
         self._yaw_odom = None
         self._estop_keepalive = None
+        self.is_standing = False
 
         # For KATVR integration
         self._katvr_yaw_offset = 0.0
@@ -76,7 +77,7 @@ class SpotInterface:
         """ 
         Initializes SDK, authenticates, and ensures the required clients are available. 
         """
-        LOGGER.info("Initializing SpotInterface. Wait to a receive confirmation message...")
+        print("Initializing SpotInterface. Wait to a receive confirmation message...")
         self._client_name = "spot_interface"
         sdk = bosdyn.client.create_standard_sdk(self._client_name)
         self._robot = sdk.create_robot(ROBOT_IP)
@@ -103,7 +104,6 @@ class SpotInterface:
         # Power on the robot
         self._robot.power_on()
         self._robot.is_powered_on()
-        LOGGER.info("SpotInterface initialized successfully! You can now control the robot.")
 
 
     def _toggle_estop(self):
@@ -204,19 +204,26 @@ class SpotInterface:
 
     
     def stand(self):
-        blocking_stand(self._robot_command_client)
+        if not self.is_standing:
+            blocking_stand(self._robot_command_client)
+            self.is_standing = True
+            self._calibrated_with_katvr = False  # Reset calibration state
+
 
     def sit(self):
-        blocking_sit(self._robot_command_client)
+        if self.is_standing:
+            blocking_sit(self._robot_command_client)
+            self.is_standing = False
 
 
     def shutdown(self):
         """
             Makes the robot to be configured with no orientation offsets, sit down, and powers off the motors.
         """
-        LOGGER.info('Shutting down SpotInterface...')
-        self.set_idle_mode(default_height=-0.2)
-        time.sleep(1)
+        print('Shutting down SpotInterface...')
+        if self.is_standing:
+            self.set_idle_mode(default_height=-0.2)
+            time.sleep(1.5)
         self.sit()
         time.sleep(3)
         safe_power_off_cmd=RobotCommandBuilder.safe_power_off_command()
@@ -285,8 +292,50 @@ class SpotInterface:
 
     
     # ====================================================================================
-    #     METHODS FOR KATVR INTEGRATION
+    #   METHODS FOR KATVR INTEGRATION
     # ====================================================================================
+
+    def auto_sit_in_katvr(self, inputs, height_threshold=0.2, hysteresis_margin=0.1):
+        """
+        Makes the robot sit if the HDM height drops below (base_height - height_threshold) for over a time window.
+        Applies hysteresis to avoid sudden transitions.
+
+        Returns:
+            bool: True if the robot idles or sits, False otherwise.
+        """
+        hmd_height = inputs['hmd_height']  # Get the current HMD height from inputs
+
+        if inputs['stand'] == 1.0:
+            self.base_hmd_height = hmd_height
+            self.low_height_start_time = None
+            return False
+
+        if hasattr(self, 'base_hmd_height'):
+            lower_limit = self.base_hmd_height - height_threshold
+            recovery_limit = self.base_hmd_height - height_threshold + hysteresis_margin
+
+            if hmd_height < lower_limit:
+                # Height is low. Start the timer if not already started.
+                if not hasattr(self, 'low_height_start_time') or self.low_height_start_time is None:
+                    self.low_height_start_time = time.time()
+
+                elapsed = time.time() - self.low_height_start_time
+
+                if elapsed > 0.1:
+                    if self.is_standing:
+                        self.set_idle_mode(height=-0.25)
+
+                    if elapsed > 2:
+                        self.sit()
+                        self.low_height_start_time = None
+
+                    return True
+                
+            elif hmd_height > recovery_limit:
+                self.low_height_start_time = None  # Height recovered, so reset
+
+        return False
+
 
     def update_odometry_angles(self):
         """
@@ -303,7 +352,7 @@ class SpotInterface:
             z=odom_T_body.rot.z
         )
         euler = geometry.to_euler_zxy(quat)
-        self._yaw_odom = euler.yaw  # Update the class variable
+        self._yaw_odom = euler.yaw 
 
 
     def update_pid_controller(self, kp, kd, dead_zone_degrees):
@@ -318,7 +367,7 @@ class SpotInterface:
             self._pid_dead_zone_degrees = dead_zone_degrees
 
 
-    def reset_body_frame_orientation_values(self):
+    def _reset_body_frame_orientation_values(self):
         """
         Resets the body frame orientation to zero. It does NOT send a command to the robot.
         """
@@ -384,6 +433,15 @@ class SpotInterface:
         speed_lock = bool(inputs['speed_lock'])
         rotation_lock = bool(inputs['rotation_lock'])
 
+        if speed_lock:
+            self._v_x = 0.0
+            self._v_y = 0.0
+            self._v_rot = 0.0
+            self._calibrated_with_katvr = False
+            self._reset_body_frame_orientation_values() 
+            self._velocity_cmd_helper() # Send zero velocity command
+            return  # Exit early if speed is locked
+
         ''' Use KATVR velocity inputs if they are greater than zero, otherwise keep the current values
         updated from the Touch controls.'''
         if abs(katvr_vx) > 0:
@@ -391,16 +449,13 @@ class SpotInterface:
         if abs(katvr_vy) > 0:
             self._v_y = katvr_vy
 
-        if speed_lock:
-            self._v_x = 0.0
-            self._v_y = 0.0
-        
+        # Rotation lock logic
         if rotation_lock:
             self._v_rot = 0.0
             self._calibrated_with_katvr = False
             self.set_hmd_controls(hmd_controls)
         else:
-            self.reset_body_frame_orientation_values()  
+            self._reset_body_frame_orientation_values()  
             # Compute KATVR rotation. If it's greater than the joystick rotation, update self._v_rot
             katvr_v_rot = self._compute_angular_velocity(katvr_yaw_deg)
             if abs(katvr_v_rot) > abs(self._v_rot):
@@ -410,7 +465,7 @@ class SpotInterface:
         self._velocity_cmd_helper(v_x=self._v_x, v_y=self._v_y, v_rot=self._v_rot)
 
     
-    def set_idle_mode(self, default_height=0.0):
+    def set_idle_mode(self, height=0.0):
         """
         Sets the robot to idle mode by setting all velocities and orientations to zero.
         """
@@ -420,8 +475,8 @@ class SpotInterface:
         self._yaw = 0.0
         self._pitch = 0.0
         self._roll = 0.0
-        height = default_height  # Use the provided default height
         self._orientation_cmd_helper(yaw=self._yaw, pitch=self._pitch, roll=self._roll, height=height)
+        self._calibrated_with_katvr = False
 
 
     def print_spot_motion_status(self):
@@ -431,16 +486,5 @@ class SpotInterface:
         sys.stdout.write(
             f"\r[SPOT] Vx: {self._v_x:.2f} m/s | Vy: {self._v_y:.2f} | Rot: {self._v_rot:.2f} rad/s | "
             f"Yaw Error: {math.degrees(self._yaw_error):.1f}°"
-        )
-        sys.stdout.flush()
-
-
-    def print_spot_body_orientation(self):
-        """
-        Prints the robot's angles in the body frame on the same console line.
-        """
-        sys.stdout.write(
-            f"\r[SPOT] Yaw: {math.degrees(self._yaw):.1f}° | Pitch: {math.degrees(self._pitch):.1f}° | "
-            f"Roll: {math.degrees(self._roll):.1f}°"
         )
         sys.stdout.flush()

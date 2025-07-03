@@ -52,7 +52,7 @@ void StreamCapture::captureLoop() {
     cv::Mat frame;
     auto last_success = std::chrono::steady_clock::now();
     const auto timeout = std::chrono::seconds(5); // Customize the timeout
-
+    
     // Loop while the main loop is not over
     while (buffer_.run) {
         // try to grab a new image
@@ -74,6 +74,7 @@ void StreamCapture::captureLoop() {
         }
         else
             std::this_thread::sleep_for(std::chrono::milliseconds(2)); // DEBUG 
+        
         // Check for timeout
         auto now = std::chrono::steady_clock::now();
         if (now - last_success > timeout) {

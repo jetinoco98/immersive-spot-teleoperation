@@ -9,12 +9,11 @@ from data_logger import DataLogger
 
 
 # --- CONSTANTS ---
-FORWARD_VELOCITY_THRESHOLD = 1.0        # The minimum velocity obtained from KATVR to be considered as forward movement
+VELOCITY_THRESHOLD = 1.0                # The minimum velocity to be considered as forward movement
 FORWARD_VELOCITY_CHANGE_LIMIT = 3.0     # The velocity limit above which the forward velocity is considered high
 FORWARD_VELOCITY_NORMAL = 0.4           # NORMAL SPEED
 FORWARD_VELOCITY_HIGH = 0.5             # HIGH SPEED
 # ---
-LATERAL_VELOCITY_THRESHOLD = 1.0        # The minimum velocity from which lateral movement is considered
 LATERAL_VELOCITY_VALUE = 0.25           # A transformed value to be used for lateral velocity
 
 # --- TESTING MODE ---
@@ -68,19 +67,19 @@ class KATVR:
         self.lateral_velocity = 0
 
         if self.state == 'normal':
-            if abs(self.filtered_velocity) < FORWARD_VELOCITY_THRESHOLD:
+            if abs(self.filtered_velocity) < VELOCITY_THRESHOLD:
                 self.forward_velocity = 0.0
-            elif FORWARD_VELOCITY_THRESHOLD <= abs(self.filtered_velocity) < FORWARD_VELOCITY_CHANGE_LIMIT:
+            elif VELOCITY_THRESHOLD <= abs(self.filtered_velocity) < FORWARD_VELOCITY_CHANGE_LIMIT:
                 self.forward_velocity = FORWARD_VELOCITY_NORMAL if self.filtered_velocity > 0 else -FORWARD_VELOCITY_NORMAL
             else:
                 self.forward_velocity = FORWARD_VELOCITY_HIGH if self.filtered_velocity > 0 else -FORWARD_VELOCITY_HIGH
 
         elif self.state == 'walking_right':
-            if abs(self.filtered_velocity) >= LATERAL_VELOCITY_THRESHOLD:
+            if abs(self.filtered_velocity) >= VELOCITY_THRESHOLD:
                 self.lateral_velocity = -LATERAL_VELOCITY_VALUE
 
         elif self.state == 'walking_left':
-            if abs(self.filtered_velocity) >= LATERAL_VELOCITY_THRESHOLD:
+            if abs(self.filtered_velocity) >= VELOCITY_THRESHOLD:
                 self.lateral_velocity = LATERAL_VELOCITY_VALUE
 
 
@@ -99,12 +98,19 @@ class KATVR:
         """Detects virtual yaw jumps and updates actual yaw and walking state."""
         if self.previous_yaw_virtual is None:
             return
+        
+        # When the filtered velocity is less than half the threshold, state must be normal
+        if abs(self.filtered_velocity) < (VELOCITY_THRESHOLD / 2):
+            self.state = 'normal'
+            self.forward_velocity = 0.0
+            self.lateral_velocity = 0.0
 
+        # Calculate the change in yaw
         delta_angle = self.yaw_virtual - self.previous_yaw_virtual
         delta_angle = (delta_angle + 180) % 360 - 180
 
-        # Check for jump
-        if abs(delta_angle) >= 80:
+        # Check for jumps
+        if abs(delta_angle) >= 60:
             if self.state == "normal":
                 if delta_angle > 0:
                     self.state = "walking_left"
@@ -247,10 +253,13 @@ class KATVRManager:
         print("\n=== KATVR SENSOR TEST SEQUENCE ===\n")
 
         input("TEST 1. Prepare to turn in place. Press ENTER when ready...")
-        self.run_test("turning_in_place", 20, 10)
+        self.run_test("turning_in_place", 60, 10)
 
         input("TEST 2. Prepare to walk. Press ENTER when ready...")
-        self.run_test("walking", 20, 10)
+        self.run_test("walking", 60, 10)
+
+        input("TEST 3. Prepare to walk laterally. Press ENTER when ready...")
+        self.run_test("lateral_movement", 30, 5)
 
         print("\n=== TEST SEQUENCE ENDED ===")
 

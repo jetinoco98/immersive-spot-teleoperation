@@ -16,13 +16,13 @@ int main(int argc, char* argv[])
     ovrSession oculus_session = nullptr;
     if (!InitOculus(oculus_session)) return -1;
 
-    // Initialize the stream capture process
-    StreamCapture stream(config.stream_address);
-    if (!stream.start()) return -1;
+    // // Initialize the stream capture process
+    // StreamCapture stream(config.stream_address);
+    // if (!stream.start()) return -1;
 
-    // Initialize the Oculus renderer
-    OculusRenderer renderer(oculus_session);
-    if (!renderer.initialize(stream.width, stream.height)) return -1;
+    // // Initialize the Oculus renderer
+    // OculusRenderer renderer(oculus_session);
+    // if (!renderer.initialize(stream.width, stream.height)) return -1;
     
     // Execute python scripts
     runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", config.ip_address);
@@ -32,9 +32,9 @@ int main(int argc, char* argv[])
     ZMQPublisher zmq("tcp://localhost:5555");
 
     // Create data variable for HDM & Touch Controller State
-    float data[17];
+    float data[18];
 
-    printf("Starting main loop...\n");
+    printf("Starting main loop...\n\n\n");
 
     // ============================================================================
     //                                 MAIN LOOP
@@ -43,7 +43,7 @@ int main(int argc, char* argv[])
     while (true) {
 
         // --- Update the Oculus renderer
-        if (!renderer.update(stream.buffer_)) {break;}
+        // if (!renderer.update(stream.buffer_)) {break;}
 
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
         getOculusInput(data, oculus_session);
@@ -105,34 +105,6 @@ void runPythonScript(const std::string& relativeScriptPath, const std::string& a
 }
 
 
-RPY quaternionToRPY(const ovrTrackingState& ts) {
-    RPY rpy;
-    float w = ts.HeadPose.ThePose.Orientation.w;
-    float x = ts.HeadPose.ThePose.Orientation.x;
-    float y = ts.HeadPose.ThePose.Orientation.y;
-    float z = ts.HeadPose.ThePose.Orientation.z;
-
-    // Pitch (x-axis rotation)
-    float sinr_cosp = 2 * (w * x + y * z);
-    float cosr_cosp = 1 - 2 * (x * x + y * y);
-    rpy.pitch = std::atan2(sinr_cosp, cosr_cosp);
-
-    // Yaw (y-axis rotation)
-    float siny_cosp = 2 * (w * y + z * x);
-    float cosy_cosp = 1 - 2 * (y * y + z * z);
-    rpy.yaw = std::atan2(siny_cosp, cosy_cosp);
-
-    // Roll (z-axis rotation)
-    float sinp = 2 * (w * z - x * y);
-    if (std::abs(sinp) >= 1)
-        rpy.roll = std::copysign(M_PI / 2, sinp);
-    else
-        rpy.roll = std::asin(sinp);
-
-    return rpy;
-}
-
-
 void getOculusInput(float* data, ovrSession& session) {
     ovrInputState InputState;
     ovr_GetInputState(session, ovrControllerType_Touch, &InputState);
@@ -141,12 +113,18 @@ void getOculusInput(float* data, ovrSession& session) {
     ovrVector2f leftStick  = InputState.Thumbstick[ovrHand_Left];
 
     ovrTrackingState ts = ovr_GetTrackingState(session, ovr_GetTimeInSeconds(), ovrTrue);
-    RPY orientation = quaternionToRPY(ts);
+
+    // float yaw, pitch, roll;
+    OVR::Posef pose;
+    pose = ts.HeadPose.ThePose;
+    // Get Euler angles from the pose
+    float yaw, pitch, roll;
+    pose.Rotation.GetEulerAngles<OVR::Axis_Y, OVR::Axis_X, OVR::Axis_Z>(&yaw, &pitch, &roll);
 
     // Pack orientation and thumbsticks
-    data[0] = orientation.yaw;
-    data[1] = -orientation.pitch;
-    data[2] = -orientation.roll;
+    data[0] = yaw;
+    data[1] = -pitch;
+    data[2] = -roll;
     data[3] = leftStick.x;
     data[4] = leftStick.y;
     data[5] = rightStick.x;
@@ -168,9 +146,12 @@ void getOculusInput(float* data, ovrSession& session) {
     data[15] = InputState.HandTrigger[ovrHand_Left];   // grip
     data[16] = InputState.HandTrigger[ovrHand_Right];  // grip
 
-    // Line 1: Orientation
-    printf("\x1b[2K\rOrientation: (Yaw=%.2f Pitch=%.2f Roll=%.2f)         \n",
-        data[0], data[1], data[2]);
+    // New data
+    data[17] = pose.Translation.y; // <-- This is the height from floor
+
+    // Line 1: Orientation and height
+    printf("\x1b[2K\rOrientation: (Yaw=%.2f Pitch=%.2f Roll=%.2f) | Height=%.2f        \n",
+        data[0], data[1], data[2], data[17]);
 
     // Line 2: Buttons (X, Y LT, A, B, RT)
     printf("\x1b[2K\rButtons: (X=%.0f Y=%.0f LT=%.0f)   (A=%.0f B=%.0f RT=%.0f)          \n",

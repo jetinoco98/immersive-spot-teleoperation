@@ -2,6 +2,7 @@ import os
 import csv
 import time
 from datetime import datetime
+from katvr import KATVR
 
 class DataLogger:
     def __init__(self, test_name):
@@ -29,7 +30,7 @@ class DataLogger:
         self.writer = csv.DictWriter(self.file, fieldnames=self.fields)
         self.writer.writeheader()
 
-    def log(self, katvr):
+    def log(self, katvr: KATVR):
         self.writer.writerow({
             "timestamp": time.time(),
             "yaw": katvr.yaw,

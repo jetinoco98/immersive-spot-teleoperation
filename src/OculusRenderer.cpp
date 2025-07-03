@@ -86,17 +86,20 @@ bool OculusRenderer::update(VideoCaptureFrameBuffer& buffer)
         }
     }
 
-    try
-    {
-        grabFrame(buffer);
-        renderToOculus(buffer);
-    }
+    try { grabFrame(buffer); }
     catch(const std::exception& e)
     {
-        printf("Failed to update Oculus renderer: %s\n", e.what());
+        printf("Failed to grab frame: %s\n", e.what());
         return false;
     }
-    
+
+    try { renderToOculus(buffer); }
+    catch(const std::exception& e)
+    {
+        printf("Failed to render to Oculus: %s\n", e.what());
+        return false;
+    }
+
     return true;
 }
 
@@ -112,11 +115,6 @@ void OculusRenderer::BindCVMat2GLTexture(cv::Mat& image, GLuint& imageTexture)
         return;
     }
 
-    // Convert image to RGB format
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
-    cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
-
-    glGenTextures(1, &imageTexture);
     glBindTexture(GL_TEXTURE_2D, imageTexture);
 
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
@@ -356,19 +354,19 @@ void OculusRenderer::initializeRectangleBuffers()
 {
     // Compute the useful part of the ZED image
     unsigned int widthFinal = bufferSize_.w / 2;
-    float heightGL = 1.f;
+    float heightGL = 0.5f;
     float widthGL = 1.f;
-    if (captureWidth_ > 0.f) {
-        unsigned int heightFinal = captureHeight_ * widthFinal / (float)captureWidth_;
-        // Convert this size to OpenGL viewport's frame's coordinates
-        heightGL = (heightFinal) / (float)(bufferSize_.h);
-        widthGL = ((captureWidth_ * (heightFinal / (float)captureHeight_)) / (float)widthFinal);
-    }
-    else {
-        std::cout << "WARNING: Video capture parameters got wrong values."
-            "Default vertical and horizontal FOV are used."
-            << std::endl;
-    }
+    // if (captureWidth_ > 0.f) {
+    //     unsigned int heightFinal = captureHeight_ * widthFinal / (float)captureWidth_;
+    //     // Convert this size to OpenGL viewport's frame's coordinates
+    //     heightGL = (heightFinal) / (float)(bufferSize_.h);
+    //     widthGL = ((captureWidth_ * (heightFinal / (float)captureHeight_)) / (float)widthFinal);
+    // }
+    // else {
+    //     std::cout << "WARNING: Video capture parameters got wrong values."
+    //         "Default vertical and horizontal FOV are used."
+    //         << std::endl;
+    // }
 
     // Compute the Horizontal Oculus' field of view with its parameters
     float ovrFovH = (atanf(hmdDesc_.DefaultEyeFov[0].LeftTan) + atanf(hmdDesc_.DefaultEyeFov[0].RightTan));
@@ -452,6 +450,8 @@ void OculusRenderer::grabFrame(VideoCaptureFrameBuffer& buffer)
         return;
     }
 
+    std::lock_guard<std::mutex> lock(buffer.mtx);
+    
     // If successful grab a new capture image
     if (buffer.new_frame) {
         // Set the flag to false
@@ -513,7 +513,7 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
         // Set the color texture as the current swap texture
         ld.ColorTexture[eye] = textureChain_;
         // Set the viewport as the right or left vertical half part of the color texture
-        ld.Viewport[eye] = OVR::Recti(eye == ovrEye_Left ? 0 : (bufferSize_.w / 2) + 200, 0, (bufferSize_.w / 2) - 200, bufferSize_.h);
+        ld.Viewport[eye] = OVR::Recti(eye == ovrEye_Left ? 0 : (bufferSize_.w / 2) + 280, 0, (bufferSize_.w / 2) - 280, bufferSize_.h);
         // Set the field of view
         ld.Fov[eye] = hmdDesc_.DefaultEyeFov[eye];
         // Set the pose matrix
@@ -532,11 +532,9 @@ void OculusRenderer::renderToOculus(VideoCaptureFrameBuffer& buffer)
         ovr_GetLastErrorInfo(&errInf);
         throw std::runtime_error(std::string("ERROR: failed to submit frame: ") + errInf.ErrorString);
     }
-
     if (result == ovrSuccess && !isVisible_) {
         std::cout << "The application is now shown in the headset." << std::endl;
     }
-
     isVisible_ = (result == ovrSuccess);
 
     // This is not really needed for this application but it may be useful for an more advanced application
