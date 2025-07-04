@@ -149,12 +149,12 @@ if __name__ == "__main__":
     except FileNotFoundError:
         print("Log file for turning in place not found. Please ensure the file exists in the logs directory.")
 
-    try:
-        analyze_forward_motion_log("katvr_log_walking.csv")
-    except FileNotFoundError:
-        print("Log file for walking forward not found. Please ensure the file exists in the logs directory.")
+    # try:
+    #     analyze_forward_motion_log("katvr_log_walking.csv")
+    # except FileNotFoundError:
+    #     print("Log file for walking forward not found. Please ensure the file exists in the logs directory.")
 
-    try:
-        analyze_lateral_motion_log("katvr_log_lateral_movement.csv")
-    except FileNotFoundError:
-        print("Log file for lateral movement not found. Please ensure the file exists in the logs directory.")
+    # try:
+    #     analyze_lateral_motion_log("katvr_log_lateral_movement.csv")
+    # except FileNotFoundError:
+    #     print("Log file for lateral movement not found. Please ensure the file exists in the logs directory.")

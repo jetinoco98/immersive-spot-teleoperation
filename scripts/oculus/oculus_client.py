@@ -47,7 +47,7 @@ def main(broker_address):
     threading.Thread(target=input_processor.receive_from_zmq, daemon=True).start() # Start the ZMQ receiver thread
 
     try:
-        # Temporary: PID config
+        # TEMPORARY: PID config
         last_sent_time = time.time()
         script_dir = os.path.dirname(os.path.abspath(__file__))
         config_path = os.path.join(script_dir, "spot_pid.json")
@@ -72,7 +72,7 @@ def main(broker_address):
                 payload = json.dumps(input_processor.standard_inputs)
                 oculus.client.publish(topic="spot/inputs", payload=payload)
             
-            # Temporary: Send PID config periodically
+            # TEMPORARY: Send PID config periodically
             if input_processor.is_katvr_active():
                 now = time.time()
                 if now - last_sent_time > 1:  # Send data every second

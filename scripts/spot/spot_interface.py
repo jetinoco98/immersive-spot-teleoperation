@@ -12,6 +12,8 @@ import logging
 import time
 import math
 import numpy as np
+import csv, os
+from datetime import datetime
 import sys
 import bosdyn.api.spot.robot_command_pb2 as spot_command_pb2
 import bosdyn.client
@@ -21,13 +23,12 @@ from bosdyn.api import estop_pb2
 from bosdyn.api import geometry_pb2, trajectory_pb2
 from bosdyn.api.geometry_pb2 import SE2Velocity, SE2VelocityLimit, Vec2
 from bosdyn.client.estop import EstopClient, EstopEndpoint, EstopKeepAlive
-from bosdyn.client.lease import LeaseClient
+from bosdyn.client.lease import LeaseClient, LeaseKeepAlive
 from bosdyn.client.power import PowerClient
 from bosdyn.client.robot_command import RobotCommandBuilder, RobotCommandClient, blocking_stand, blocking_sit
 from bosdyn.client.robot_state import RobotStateClient
 from bosdyn import geometry
 from bosdyn.client.frame_helpers import ODOM_FRAME_NAME, BODY_FRAME_NAME, get_a_tform_b
-
 
 LOGGER = logging.getLogger()
 
@@ -57,10 +58,12 @@ class SpotInterface:
         self._yaw_odom = None
         self._estop_keepalive = None
         self.is_standing = False
+        self.autosit_active = False
 
         # For KATVR integration
-        self._katvr_yaw_offset = 0.0
-        self._calibrated_with_katvr = False
+        self.katvr_yaw_offset = 0.0
+        self.calibrated_with_katvr = False
+        self.base_hmd_height = None
 
         # For PID controller
         self._yaw_error = 0.0
@@ -98,7 +101,7 @@ class SpotInterface:
         """
         # Gain Control of the robot
         self._lease_client.acquire()
-        self._lease_keepalive = bosdyn.client.lease.LeaseKeepAlive(self._lease_client, return_at_exit=True)
+        self._lease_keepalive = LeaseKeepAlive(self._lease_client, must_acquire=True, return_at_exit=True)
         self._toggle_estop()
 
         # Power on the robot
@@ -207,14 +210,14 @@ class SpotInterface:
         if not self.is_standing:
             blocking_stand(self._robot_command_client)
             self.is_standing = True
-            self._calibrated_with_katvr = False  # Reset calibration state
+            self.calibrated_with_katvr = False  # Reset calibration state
 
 
     def sit(self):
         if self.is_standing:
             blocking_sit(self._robot_command_client)
             self.is_standing = False
-
+            self.calibrated_with_katvr = False  # Reset calibration state
 
     def shutdown(self):
         """
@@ -222,10 +225,10 @@ class SpotInterface:
         """
         print('Shutting down SpotInterface...')
         if self.is_standing:
-            self.set_idle_mode(default_height=-0.2)
+            self.set_idle_mode(height=-0.2)
             time.sleep(1.5)
         self.sit()
-        time.sleep(3)
+        time.sleep(2.5)
         safe_power_off_cmd=RobotCommandBuilder.safe_power_off_command()
         self._robot_command_client.robot_command(command= safe_power_off_cmd)
         time.sleep(2.5)
@@ -269,7 +272,7 @@ class SpotInterface:
         self._v_rot = touch_controls[2]
 
         if self._v_rot != 0:
-            self._calibrated_with_katvr = False  # Reset calibration state
+            self.calibrated_with_katvr = False  # Reset calibration state
 
 
     def send_velocity_command(self, vx=None, vy=None, vrot=None):
@@ -295,22 +298,18 @@ class SpotInterface:
     #   METHODS FOR KATVR INTEGRATION
     # ====================================================================================
 
-    def auto_sit_in_katvr(self, inputs, height_threshold=0.2, hysteresis_margin=0.1):
+    def auto_sit_in_katvr(self, inputs, height_threshold=0.18, hysteresis_margin=0.1):
         """
-        Makes the robot sit if the HDM height drops below (base_height - height_threshold) for over a time window.
-        Applies hysteresis to avoid sudden transitions.
-
-        Returns:
-            bool: True if the robot idles or sits, False otherwise.
+        Makes the robot sit if the HDM height drops below a threshold over a time window.
         """
         hmd_height = inputs['hmd_height']  # Get the current HMD height from inputs
 
         if inputs['stand'] == 1.0:
             self.base_hmd_height = hmd_height
             self.low_height_start_time = None
-            return False
+            return
 
-        if hasattr(self, 'base_hmd_height'):
+        if self.base_hmd_height is not None:
             lower_limit = self.base_hmd_height - height_threshold
             recovery_limit = self.base_hmd_height - height_threshold + hysteresis_margin
 
@@ -323,18 +322,29 @@ class SpotInterface:
 
                 if elapsed > 0.1:
                     if self.is_standing:
-                        self.set_idle_mode(height=-0.25)
+                        self.set_idle_mode(height=-0.3)
 
-                    if elapsed > 2:
+                    if elapsed > 1.5:
                         self.sit()
+                        self.autosit_active = True
                         self.low_height_start_time = None
-
-                    return True
                 
             elif hmd_height > recovery_limit:
                 self.low_height_start_time = None  # Height recovered, so reset
 
-        return False
+
+    def auto_stand_in_katvr(self, inputs):
+        """
+        Makes the robot stand if the HDM height reaches 'base_hmd_height' and self.autosit_active is True.
+        """
+        hmd_height = inputs['hmd_height']
+
+        if not self.base_hmd_height:
+            return
+
+        if self.autosit_active and hmd_height >= self.base_hmd_height:
+            self.autosit_active = False
+            self.stand()
 
 
     def update_odometry_angles(self):
@@ -376,6 +386,38 @@ class SpotInterface:
         self._roll = 0.0
 
 
+    def _log_pd_data(self, 
+        timestamp, katvr_yaw_deg, odom_yaw_rad, yaw_error, d_error, raw_output, saturated_output, 
+        kp, kd, deadzone):
+        """
+        Logs PD controller data to a CSV file for later analysis.
+        """
+
+        log_dir = "logs"
+        os.makedirs(log_dir, exist_ok=True)
+
+        if not hasattr(self, "_pd_log_file"):
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._pd_log_file = os.path.join(log_dir, f"pd_log_{now_str}.csv")
+            with open(self._pd_log_file, mode='w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "timestamp", "katvr_yaw_deg", "odom_yaw_deg",
+                    "yaw_error_rad", "d_error_rad_per_s",
+                    "raw_output", "saturated_output", "kp", "kd", "deadzone"
+                ])
+
+        odom_yaw_deg = math.degrees(odom_yaw_rad)
+
+        with open(self._pd_log_file, mode='a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp, katvr_yaw_deg, odom_yaw_deg,
+                yaw_error, d_error,
+                raw_output, saturated_output, kp, kd, deadzone
+            ])
+
+
     def _compute_angular_velocity(self, katvr_yaw_deg):
         """
         Compute rotational velocity using PID control to align yaw with KATVR.
@@ -383,18 +425,16 @@ class SpotInterface:
         self.update_odometry_angles()
         katvr_yaw = math.radians(katvr_yaw_deg)
 
-        if not self._calibrated_with_katvr:
-            self._katvr_yaw_offset = katvr_yaw - self._yaw_odom
-            self._calibrated_with_katvr = True
+        if not self.calibrated_with_katvr:
+            self.katvr_yaw_offset = katvr_yaw - self._yaw_odom
+            self.calibrated_with_katvr = True
             # Reset Yaw Error and Time
             self._yaw_error = 0.0
             self._prev_time = time.time()
             return 0.0
 
         # Compute calibrated yaw target for the robot
-        target_robot_yaw = katvr_yaw - self._katvr_yaw_offset
-
-        # Normalize yaw error to [-π, π]
+        target_robot_yaw = katvr_yaw - self.katvr_yaw_offset
         self._yaw_error = (target_robot_yaw - self._yaw_odom + np.pi) % (2 * np.pi) - np.pi
 
         # Set variables for PID control
@@ -412,14 +452,28 @@ class SpotInterface:
         d_error = (self._yaw_error - prev_error) / dt if dt > 0 else 0.0
         self._prev_yaw_error = self._yaw_error
 
+        # Output calculation
+        raw_output = Kp * self._yaw_error + Kd * d_error
+        saturated_output = max(-ANGULAR_VEL_MAX, min(ANGULAR_VEL_MAX, raw_output))
+
         # Dead zone logic
         if abs(self._yaw_error) < DEAD_ZONE_RAD:
-            output = 0.0
+            saturated_output = 0.0
 
-        # Output calculation
-        output = Kp * self._yaw_error + Kd * d_error
-        output = max(-ANGULAR_VEL_MAX, min(ANGULAR_VEL_MAX, output))
-        return output
+        self._log_pd_data(
+            timestamp=now,
+            katvr_yaw_deg=katvr_yaw_deg,
+            odom_yaw_rad=self._yaw_odom,
+            yaw_error=self._yaw_error,
+            d_error=d_error,
+            raw_output=raw_output,
+            saturated_output=saturated_output,
+            kp=Kp,
+            kd=Kd,
+            deadzone=DEAD_ZONE_RAD
+        )
+
+        return saturated_output
     
     
     def set_katvr_command(self, inputs, hmd_controls):
@@ -437,7 +491,7 @@ class SpotInterface:
             self._v_x = 0.0
             self._v_y = 0.0
             self._v_rot = 0.0
-            self._calibrated_with_katvr = False
+            self.calibrated_with_katvr = False
             self._reset_body_frame_orientation_values() 
             self._velocity_cmd_helper() # Send zero velocity command
             return  # Exit early if speed is locked
@@ -452,7 +506,7 @@ class SpotInterface:
         # Rotation lock logic
         if rotation_lock:
             self._v_rot = 0.0
-            self._calibrated_with_katvr = False
+            self.calibrated_with_katvr = False
             self.set_hmd_controls(hmd_controls)
         else:
             self._reset_body_frame_orientation_values()  
@@ -476,7 +530,7 @@ class SpotInterface:
         self._pitch = 0.0
         self._roll = 0.0
         self._orientation_cmd_helper(yaw=self._yaw, pitch=self._pitch, roll=self._roll, height=height)
-        self._calibrated_with_katvr = False
+        self.calibrated_with_katvr = False
 
 
     def print_spot_motion_status(self):

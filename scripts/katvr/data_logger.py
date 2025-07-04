@@ -2,7 +2,6 @@ import os
 import csv
 import time
 from datetime import datetime
-from katvr import KATVR
 
 class DataLogger:
     def __init__(self, test_name):
@@ -25,21 +24,22 @@ class DataLogger:
             n += 1
 
         self.fields = ["timestamp", "yaw", "yaw_virtual", "velocity", "filtered_velocity",
-                       "forward_velocity", "lateral_velocity", "angular_velocity"]
+                       "forward_velocity", "lateral_velocity", "angular_velocity", "state"]
         self.file = open(self.file_path, mode="w", newline='')
         self.writer = csv.DictWriter(self.file, fieldnames=self.fields)
         self.writer.writeheader()
 
-    def log(self, katvr: KATVR):
+    def log(self, katvr):
         self.writer.writerow({
             "timestamp": time.time(),
-            "yaw": katvr.yaw,
-            "yaw_virtual": katvr.yaw_virtual,
-            "velocity": katvr.velocity,
-            "filtered_velocity": katvr.filtered_velocity,
-            "forward_velocity": katvr.forward_velocity,
-            "lateral_velocity": katvr.lateral_velocity,
-            "angular_velocity": katvr.angular_velocity
+            "yaw": round(katvr.yaw, 3),
+            "yaw_virtual": round(katvr.yaw_virtual, 3),
+            "velocity": round(katvr.velocity, 3),
+            "filtered_velocity": round(katvr.filtered_velocity, 3),
+            "forward_velocity": round(katvr.forward_velocity, 3),
+            "lateral_velocity": round(katvr.lateral_velocity, 3),
+            "angular_velocity": round(katvr.angular_velocity, 3),
+            "state": katvr.state,
         })
 
     def close(self):

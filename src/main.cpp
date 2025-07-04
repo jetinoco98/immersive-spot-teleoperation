@@ -16,13 +16,13 @@ int main(int argc, char* argv[])
     ovrSession oculus_session = nullptr;
     if (!InitOculus(oculus_session)) return -1;
 
-    // // Initialize the stream capture process
-    // StreamCapture stream(config.stream_address);
-    // if (!stream.start()) return -1;
+    // Initialize the stream capture process
+    StreamCapture stream(config.stream_address);
+    if (!stream.start()) return -1;
 
-    // // Initialize the Oculus renderer
-    // OculusRenderer renderer(oculus_session);
-    // if (!renderer.initialize(stream.width, stream.height)) return -1;
+    // Initialize the Oculus renderer
+    OculusRenderer renderer(oculus_session);
+    if (!renderer.initialize(stream.width, stream.height)) return -1;
     
     // Execute python scripts
     runPythonScript("\\..\\..\\scripts\\oculus\\oculus_client.py", config.ip_address);
@@ -43,13 +43,13 @@ int main(int argc, char* argv[])
     while (true) {
 
         // --- Update the Oculus renderer
-        // if (!renderer.update(stream.buffer_)) {break;}
+        if (!renderer.update(stream.buffer_)) {break;}
 
         // --- Query the HMD for the input state (buttons, thumbsticks, etc.)
         getOculusInput(data, oculus_session);
 
         // --- Send HDM data over ZeroMQ socket
-        zmq.send("from_hdm", data, sizeof(data));
+        zmq.send("from_hmd", data, sizeof(data));
 
         // --- Check if the HMD is still present
         ovrSessionStatus sessionStatus;

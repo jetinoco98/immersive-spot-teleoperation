@@ -110,15 +110,17 @@ class SpotClient:
 
         if self.robot.auto_sit_in_katvr(self.alternative_inputs):
             return
+        
+        self.robot.auto_stand_in_katvr(self.alternative_inputs)
 
         if not self.robot.is_standing:
             return
         
         # Update HDM inputs with LQR-optimized controls
         hmd_inputs = [
-            self.alternative_inputs['hdm_relative_yaw'],   # Relative HDM Yaw (radians)
-            self.alternative_inputs['hdm_pitch'],          # HDM Pitch (radians)
-            self.alternative_inputs['hdm_roll'],           # HDM Roll (radians)
+            self.alternative_inputs['hmd_relative_yaw'],   # Relative HDM Yaw (radians)
+            self.alternative_inputs['hmd_pitch'],          # HDM Pitch (radians)
+            self.alternative_inputs['hmd_roll'],           # HDM Roll (radians)
         ]
         spot_measures = self.robot.get_body_orientation()
         hmd_controls = self.controller.get_hmd_controls(hmd_inputs, spot_measures)

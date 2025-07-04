@@ -3,7 +3,6 @@ import json
 import time
 import struct
 import math
-from katvr_calibration import KATVRCalibration
 
 
 class InputProcessor:
@@ -24,13 +23,13 @@ class InputProcessor:
         socket = context.socket(zmq.SUB)
         socket.bind("tcp://*:5555")
         # Subscribe to both topics
-        socket.setsockopt_string(zmq.SUBSCRIBE, "from_hdm")
+        socket.setsockopt_string(zmq.SUBSCRIBE, "from_hmd")
         socket.setsockopt_string(zmq.SUBSCRIBE, "from_katvr")
 
         while True:
             zmq_topic = socket.recv_string()
             message = socket.recv()
-            if zmq_topic == "from_hdm":
+            if zmq_topic == "from_hmd":
                 self.oculus_data_processor(message)
             if zmq_topic == "from_katvr":
                 self.katvr_data_processor(message)
@@ -55,7 +54,7 @@ class InputProcessor:
         self.inputs['right_trigger'] = oculus_inputs[14]  # Right Index Trigger [0,1]
         self.inputs['left_grip'] = oculus_inputs[15]  # Left Grip [0,1]
         self.inputs['right_grip'] = oculus_inputs[16]  # Right Grip [0,1]
-        self.inputs['hdm_height'] = oculus_inputs[17]
+        self.inputs['hmd_height'] = oculus_inputs[17]
         self.check_hmd_yaw_calibration()
         self.create_standard_inputs()
 
@@ -104,12 +103,12 @@ class InputProcessor:
     def create_alternative_inputs(self):
         self.katvr.update_values(self.inputs)
         if self.inputs['button_rt'] > 0.5:
-            self.katvr.requires_hdm_calibration = True
+            self.katvr.requires_hmd_calibration = True
 
         self.alternative_inputs = {
-            'hdm_relative_yaw': self.katvr.get_hdm_relative_angle(),  # Relative HDM Yaw (radians)
-            'hdm_pitch': self.inputs['hmd_pitch'],  # HDM Pitch (radians)
-            'hdm_roll': self.inputs['hmd_roll'],  # HDM Roll (radians)
+            'hmd_relative_yaw': self.katvr.get_hmd_relative_angle(),  # Relative HDM Yaw (radians)
+            'hmd_pitch': self.inputs['hmd_pitch'],  # HDM Pitch (radians)
+            'hmd_roll': self.inputs['hmd_roll'],  # HDM Roll (radians)
             'katvr_yaw': self.katvr.yaw,  # KATVR Yaw (degrees)
             'katvr_forward_velocity': self.inputs['katvr_forward_velocity'],  # KATVR Forward Velocity (m/s)
             'katvr_lateral_velocity': self.inputs['katvr_lateral_velocity'],  # KATVR Lateral Velocity (m/s)
@@ -120,6 +119,40 @@ class InputProcessor:
             'rotate': self.inputs['left_joystick_x'],  # Rotate
             'speed_lock': (1.0 if self.inputs['right_trigger'] > 0.5 else 0.0),  # Speed Lock (1.0 if pressed, else 0.0)
             'rotation_lock': (1.0 if self.inputs['right_grip'] > 0.5 else 0.0),  # Rotation Lock (1.0 if pressed, else 0.0)
-            'hdm_height': self.inputs['hdm_height'],  # HDM Height
+            'hmd_height': self.inputs['hmd_height'],  # HDM Height
         }
 
+
+
+class KATVRCalibration:
+    """
+    Handles the calibration between the KATVR device and the head-mounted display (HMD)
+    """
+    def __init__(self):
+        self.hmd_yaw = None
+        self.yaw = None
+        self.requires_hmd_calibration = True
+        self.offset = 0
+
+    # --- PRIVATE METHODS ---
+    def normalize_angle(self, angle):
+        return ((angle + 180) % 360) - 180
+
+    def calibrate_with_hmd(self):
+        if self.requires_hmd_calibration:
+            self.offset = self.normalize_angle(self.hmd_yaw - self.yaw)
+            self.requires_hmd_calibration = False
+        
+    # --- PUBLIC METHODS ---
+    def update_values(self, inputs):
+        self.yaw = inputs['katvr_yaw']  # In degrees
+        self.hmd_yaw = self.normalize_angle(math.degrees(inputs['hmd_yaw'])) 
+
+    def get_hmd_relative_angle(self):
+        """
+        Get the head-relative angle between the head-mounted display (HMD) and the KATVR device.
+        The result is in radians.
+        """
+        self.calibrate_with_hmd()
+        relative_angle = self.normalize_angle(self.hmd_yaw - self.yaw - self.offset)
+        return math.radians(relative_angle)  # Convert to radians
